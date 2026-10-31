@@ -388,7 +388,8 @@ if ticker:
         curr_row += 1
 
     if "MACD" in ind_options:
-        fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], line=dict(color='#38bdf8', width=1.2), name='MACD'), row=curr_trace := go.Scatter(x=df.index, y=df['MACD_Signal'], line=dict(color='#f97316', width=1.2), name='Signal'), row=curr_row, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], line=dict(color='#38bdf8', width=1.2), name='MACD'), row=curr_row, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], line=dict(color='#f97316', width=1.2), name='Signal'), row=curr_row, col=1)
         curr_row += 1
 
     fig.update_layout(
@@ -432,7 +433,7 @@ if ticker:
     else:
         st.info("Nessuna notizia recente.")
 
-    # GUIDA ACCADEMICA CON STRINGA RAW (CORRETTO BUG LATEX) E SPIEGAZIONE KPI
+    # GUIDA ACCADEMICA E MATEMATICA DI FRONTIERA
     st.write("")
     with st.expander("📖 Guida ai Risultati (KPI) e Trattazione Matematica di Frontiera"):
         st.markdown(r"""
