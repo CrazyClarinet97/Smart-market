@@ -433,18 +433,32 @@ if ticker:
     else:
         st.info("Nessuna notizia recente.")
 
-    # GUIDA ACCADEMICA E MATEMATICA DI FRONTIERA
+    # GUIDA ACCADEMICA E MATEMATICA DI FRONTIERA CON BANDE KPI
     st.write("")
-    with st.expander("📖 Guida ai Risultati (KPI) e Trattazione Matematica di Frontiera"):
+    with st.expander("📖 Guida ai Risultati (KPI), Bande Operative e Trattazione Matematica"):
         st.markdown(r"""
-        ### 1. Guida alla Lettura dei Risultati Iniziali (KPI)
-        Prima di analizzare il grafico, la schermata superiore riassume le metriche chiave del terminale:
-        * **ML Signal & Probabilità Rialzo (es. BUY / 68.5%):** È l'output del modello di Machine Learning (Regressione Logistica stocastica). Indica la probabilità stimata (% da 0 a 100) che il prezzo dell'asset chiuda in rialzo rispetto a oggi nell'orizzonte temporale selezionato ($1\text{D}, 3\text{D}, 7\text{D}$). 
-          * *Soglie di Segnale:* $\ge 62\%$ genera **BUY**; $\le 38\%$ genera **SELL**; tra $38\%$ e $62\%$ genera **HOLD** (attesa).
-        * **Prezzo Attuale & Variazione Giornaliera:** Mostra l'ultimo prezzo di chiusura ufficiale disponibile e la variazione percentuale rispetto alla seduta precedente.
-        * **Stop Loss & R/R Ratio:** Il livello monetario esatto in cui tagliare il rischio in caso di movimento avverso, accompagnato dal **Rapporto Rischio/Premio (R/R Ratio)** espresso nella forma $1 : X$ (es. $1 : 2.1$ significa che per ogni dollaro rischiato, il target punta a guadagnarne 2.1).
-        * **Sortino Ratio:** Indice di efficienza del rendimento corretto per il rischio. Più è alto (es. $> 1.5$), migliore è la qualità dei guadagni rispetto alle perdite subite.
-        * **Max Drawdown (1Y):** Misura la massima perdita percentuale picco-valle registrata dall'asset negli ultimi 12 mesi. Indica il rischio di coda storico.
+        ### 1. Guida ai KPI, Bande di Valutazione e Regimi Operativi
+        Questa sezione definisce le soglie quantitative e le bande di riferimento per stabilire se i valori registrati supportano l'operatività (BUY) o suggeriscono cautela (HOLD/SELL):
+
+        * **ML Signal & Probabilità di Rialzo (Output del Modello):**
+          * 🟢 **Banda Ottimale per BUY ($P \ge 62\%$):** Alta confidenza statistica. Il modello stocastico individua una probabilità di chiusura in positivo superiore alla soglia di arbitraggio.
+          * 🟡 **Banda Neutra / HOLD ($38\% < P < 62\%$):** Zona di indecisione o rumore di mercato. Nessuna operazione consigliata.
+          * 🔴 **Banda Critica per SELL ($P \le 38\%$):** Alta probabilità di ribasso o esaurimento del momentum. Condizione di uscita o copertura.
+
+        * **R/R Ratio (Rapporto Rischio / Premio):**
+          * 🟢 **Ottimale ($R/R \ge 1.5$):** Il reward potenziale supera ampiamente il rischio associato allo Stop Loss. Il valore atteso (mathematical expectancy) è altamente favorevole.
+          * 🟡 **Marginale ($1.2 \le R/R < 1.5$):** Accettabile solo se accompagnato da una probabilità ML molto elevata ($> 70\%$).
+          * 🔴 **Scarsa / Rifiutata ($R/R < 1.2$):** Rischio sproporzionato rispetto al target di profitto. Operazione da non eseguire.
+
+        * **Sortino Ratio (Efficienza del Rendimento):**
+          * 🟢 **Ottimale ($Sortino > 1.5$):** Eccellente generazione di rendimento per unità di rischio di ribasso (downside deviation). Segno di un trend solido e pulito.
+          * 🟡 **Accettabile ($0.5 \le Sortino \le 1.5$):** Rendimento nella norma storica del mercato.
+          * 🔴 **Scarsa ($Sortino < 0.5$ o Negativo):** L'asset subisce troppa volatilità negativa rispetto ai guadagni generati. Evitare l'acquisto.
+
+        * **Max Drawdown Storico (Max DD su 1 Anno):**
+          * 🟢 **Basso Rischio ($MaxDD \ge -15\%$):** Asset difensivo o in trend stabile, soggetto a correzioni contenute.
+          * 🟡 **Medio Rischio ($-30\% \le MaxDD < -15\%$):** Volatilità tipica di azioni growth o ETF settoriali esposti ai cicli macroeconomici.
+          * 🔴 **Elevato Rischio di Coda ($MaxDD < -30\%$):** Asset altamente speculativo o soggetto a crolli violenti. Richiede Stop Loss particolarmente stretti.
 
         ---
 
