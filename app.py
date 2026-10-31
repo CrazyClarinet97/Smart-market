@@ -43,6 +43,17 @@ st.markdown("""
         align-items: center;
         gap: 8px;
     }
+    .preflight-card {
+        background: rgba(15, 23, 42, 0.04);
+        border: 1px solid rgba(150, 150, 150, 0.2);
+        border-radius: 10px;
+        padding: 10px 14px;
+        margin-bottom: 14px;
+        font-size: 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
     @media (prefers-color-scheme: dark) {
         .metric-card {
             background: rgba(25, 30, 45, 0.45);
@@ -53,6 +64,11 @@ st.markdown("""
             background: rgba(56, 189, 248, 0.08);
             border: 1px solid rgba(56, 189, 248, 0.2);
             color: #f3f4f6;
+        }
+        .preflight-card {
+            background: rgba(30, 41, 59, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #e2e8f0;
         }
     }
     h1 {
@@ -245,16 +261,14 @@ def calcola_modello_ml_e_backtest(df, sentiment_score, horizon):
     X = df[feature_cols]
     y = df['Target']
 
-    # 1. Zero Data Leakage: Split temporale rigoroso (80% training, 20% test)
     split_idx = int(len(X) * 0.8)
     X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
     y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
 
     scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train) # Fit solo sul training set!
-    X_test_scaled = scaler.transform(X_test)       # Transform pulito sul test set
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
 
-    # 2. Gradient Boosting Classifier (Stato dell'arte nativo Python)
     model = GradientBoostingClassifier(n_estimators=100, learning_rate=0.05, max_depth=4, random_state=42)
     model.fit(X_train_scaled, y_train)
 
@@ -262,22 +276,19 @@ def calcola_modello_ml_e_backtest(df, sentiment_score, horizon):
     prob = model.predict_proba(last_features)[0][1] * 100
     prob = max(0.0, min(100.0, prob + (sentiment_score * 12)))
 
-    # 3. Macro Trend Gatekeeper (Filtro SMA200)
     last = df.iloc[-1]
     is_macro_bull = last['Bench_Close'] > last['Bench_SMA200']
     
     if not is_macro_bull and prob >= 62.0:
-        prob = 50.0 # Blocco protettivo contro il bear market
+        prob = 50.0
 
-    # 4. Backtester Vettorizzato Storico In-Line con stima costi/slippage
     test_predictions = model.predict(X_test_scaled)
     test_actuals = y_test.values
     correct_trades = np.sum(test_predictions == test_actuals)
     total_trades = len(test_actuals)
     
-    # Win rate netto decurtato del fattore frizione/slippage (stima realistica)
     raw_win_rate = (correct_trades / total_trades) * 100 if total_trades > 0 else 0.0
-    win_rate = max(0.0, raw_win_rate - 3.5) # Penalty conservativa per costi di transazione
+    win_rate = max(0.0, raw_win_rate - 3.5)
 
     atr = last['ATR']
     close = last['Close']
@@ -314,21 +325,53 @@ ticker = st.session_state.ticker_input
 horizon = st.session_state.horizon_input
 
 if ticker:
-    with st.spinner("Esecuzione Gradient Boosting & Backtest Netto..."):
+    with st.spinner("Esecuzione Pre-Flight Check & Gradient Boosting..."):
         df = scarica_dati(ticker)
         if df is None or df.empty:
             st.error("Nessun dato trovato per il ticker inserito o formato errato.")
             st.stop()
         
         df = calcola_indicatori(df)
+        
+        # PRE-FLIGHT METRICS CON VALORI NUMERICI ESATTI
+        avg_vol = df['Volume'].rolling(20).mean().iloc[-1]
+        last_price = df['Close'].iloc[-1]
+        last_atr = df['ATR'].iloc[-1]
+        atr_pct = (last_atr / last_price) * 100
+        
+        # Formattazione valori volume (M = Milioni, K = Migliaia)
+        vol_str = f"{avg_vol/1e6:.1f}M" if avg_vol >= 1e6 else f"{avg_vol/1e3:.0f}K"
+        
+        # Valutazione stato pre-flight con valori incorporati
+        if avg_vol > 500000:
+            liq_status = f"🟢 Liquidità: {vol_str} (Ottimale)"
+        else:
+            liq_status = f"🔴 Liquidità: {vol_str} (Bassa - Rischio Slippage)"
+
+        if 1.5 <= atr_pct <= 3.5:
+            vol_status = f"🟢 Volatilità (ATR): {atr_pct:.2f}% (Ideale)"
+        elif atr_pct < 1.5:
+            vol_status = f"🟡 Volatilità (ATR): {atr_pct:.2f}% (Bassa/Piatta)"
+        else:
+            vol_status = f"🔴 Volatilità (ATR): {atr_pct:.2f}% (Eccessiva/Rischiosa)"
+
         avg_sentiment, articoli = estrai_news_e_sentiment(ticker)
         prob, verdetto, colore, sl_val, sl_pct, tp_val, tp_pct, risk_reward, win_rate, is_macro_bull, dettagli = calcola_modello_ml_e_backtest(df, avg_sentiment, horizon)
         
         last_date = df.index[-1].strftime('%Y-%m-%d')
-        last_price = df['Close'].iloc[-1]
         change_pct = ((df['Close'].iloc[-1] - df['Close'].iloc[-2]) / df['Close'].iloc[-2]) * 100
         sortino_val = df['Sortino'].iloc[-1]
         max_dd = df['Max_DD'].iloc[-1]
+
+    # PRE-FLIGHT CHECK BAR CON VALORI ESATTI
+    st.markdown(f"""
+        <div class="preflight-card">
+            <span>🛡️ <b>Pre-Flight Check:</b></span>
+            <span>{liq_status}</span>
+            <span>|</span>
+            <span>{vol_status}</span>
+        </div>
+    """, unsafe_allow_html=True)
 
     # BOX DATA & MACRO STATUS
     macro_status = "🟢 Bullish (Sopra SMA200)" if is_macro_bull else "🔴 Bearish (Sotto SMA200 - Filtro Attivo)"
@@ -473,53 +516,46 @@ if ticker:
     else:
         st.info("Nessuna notizia recente.")
 
-    # GUIDA ACCADEMICA E MATEMATICA DI FRONTIERA INTEGRALE CON BANDE E FORMULE
+    # GUIDA ACCADEMICA E CAPITOLO PRATICO ESECUTIVO (AGGIORNATO CON VALORI PRE-FLIGHT)
     st.write("")
-    with st.expander("📖 Guida ai Risultati (KPI), Bande Operative e Architettura Gradient Boosting"):
+    with st.expander("📖 Guida ai Risultati, Pre-Flight Check e Capitolo Pratico Esecutivo"):
         st.markdown(r"""
-        ### 1. Guida ai KPI, Bande di Valutazione e Regimi Operativi
-        * **ML Signal & Probabilità di Rialzo (Gradient Boosting):**
-          * 🟢 **Banda Ottimale per BUY ($P \ge 62\%$):** Alta confidenza statistica out-of-sample. Il modello individua una probabilità di chiusura in positivo superiore alla soglia di arbitraggio.
-          * 🟡 **Banda Neutra / HOLD ($38\% < P < 62\%$):** Indecisione stocastica o rumore di mercato. Nessuna operazione.
-          * 🔴 **Banda Critica per SELL ($P \le 38\%$):** Elevata probabilità di storno o esaurimento del momentum.
+        ### 1. Capitolo Pratico: Pre-Flight Check, Selezione Ticker e Protocollo
+        Prima di valutare qualsiasi segnale, il terminale esegue automaticamente il **Pre-Flight Check** mostrando i valori numerici esatti e lo stato di convenienza:
+        * **Filtro di Liquidità (Volume Medio 20D):** Mostra il volume medio giornaliero (es. $15.2\text{M}$ o $350\text{K}$).
+          * 🟢 **Ottimale ($> 500\text{K}$ azioni):** Liquidità alta, esecuzione pulita senza slippage.
+          * 🔴 **Bassa ($\le 500\text{K}$ azioni):** Rischio di scostamento di prezzo all'ordine.
+        * **Filtro di Volatilità (ATR Percentuale sul Prezzo):** Mostra l'escursione percentuale media (es. $2.1\%$).
+          * 🟢 **Ideale ($1.5\% \le \text{ATR}\% \le 3.5\%$):** Range perfetto per lo swing trading mirato.
+          * 🟡 **Bassa / Piatta ($< 1.5\%$):** Movimento insufficiente per il target di profitto mensile.
+          * 🔴 **Eccessiva ($> 3.5\%$):** Rischio di crollo o trigger prematuro dello stop loss.
 
-        * **Backtest Net Win Rate (Post-Costi e Slippage):**
-          * 🟢 **Eccellente ($WinRate \ge 55\%$):** La strategia dimostra un vantaggio statistico reale al netto delle frizioni di mercato.
-          * 🟡 **Marginale ($48\% \le WinRate < 55\%$):** Margine stretto; richiede un R/R elevato per coprire i costi.
-          * 🔴 **Scarsa ($WinRate < 48\%$):** Modello non performante sull'asset; evitare l'operatività.
-
-        * **Macro Trend Gatekeeper (Filtro SMA200 sul Benchmark):**
-          * 🟢 **Bullish ($P_{\text{bench}} > \text{SMA}_{200}$):** Trend macro rialzista. Segnali BUY pienamente attivi.
-          * 🔴 **Bearish ($P_{\text{bench}} < \text{SMA}_{200}$):** Trend macro ribassista. Blocco automatico dei segnali BUY per protezione del capitale.
-
-        * **R/R Ratio (Rapporto Rischio / Premio):**
-          * 🟢 **Ottimale ($R/R \ge 1.5$):** Asimmetria favorevole tra profitto atteso e stop loss.
-          * 🔴 **Scarsa ($R/R < 1.2$):** Rischio non giustificato.
-
-        * **Sortino Ratio (Efficienza del Rendimento):**
-          * 🟢 **Ottimale ($Sortino > 1.5$):** Ottima qualità dei guadagni rispetto alla volatilità negativa.
-
-        * **Max Drawdown Storico (Max DD su 5 Anni):**
-          * 🟢 **Basso Rischio ($MaxDD \ge -15\%$):** Asset difensivo o in trend solido.
-          * 🔴 **Elevato Rischio ($MaxDD < -30\%$):** Asset volatile; richiede stop loss stretti.
+        * **Protocollo d'Ingresso (Le 4 Regole d'Oro):**
+          1. *Check Macro:* Il benchmark deve essere 🟢 *Bullish (Sopra SMA200)*.
+          2. *Confluenza Rigida:* Probabilità ML $\ge 62\%$, Net Win Rate $\ge 55\%$ e R/R Ratio $\ge 1.5$.
+          3. *Position Sizing:* Rischio massimo 1-2% del capitale per trade.
+          4. *Disciplina Meccanica:* Esecuzione rigida dello stop loss basato su ATR.
 
         ---
 
-        ### 2. Architettura del Modello di Machine Learning (Gradient Boosting & Zero Data Leakage)
-        Il terminale implementa un ensemble di alberi sequenziali (`GradientBoostingClassifier`) addestrato su uno storico di 5 anni ($N \approx 1250$ barre).
-        * **Target Binario ($y_t$):**
+        ### 2. Guida ai KPI e Bande di Valutazione
+        * **ML Signal & Probabilità di Rialzo (Gradient Boosting):**
+          * 🟢 **Banda Ottimale per BUY ($P \ge 62\%$):** Alta confidenza statistica out-of-sample.
+          * 🟡 **Banda Neutra / HOLD ($38\% < P < 62\%$):** Indecisione stocastica. Nessuna operazione.
+          * 🔴 **Banda Critica per SELL ($P \le 38\%$):** Alta probabilità di storno.
+        * **Backtest Net Win Rate:** Ottimale se $\ge 55\%$ (al netto dei costi di transazione).
+        * **R/R Ratio:** Ottimale se $\ge 1 : 1.5$.
+        * **Sortino Ratio:** Ottimale se $> 1.5$.
+
+        ---
+
+        ### 3. Trattazione Matematica dell'Architettura
+        * **Modello Predittivo ($y_t$):**
           $$y_t = \mathbb{I}\left( P_{t+h} > P_t \right)$$
         * **Feature Stazionarie ($\mathbf{X}_t$):**
           $$\text{Dist}_{\text{EMA}20} = \frac{P_t - \text{EMA}_{20}(P)}{\text{EMA}_{20}(P)} \cdot 100, \quad \text{RS}_{\text{Change}} = \frac{\text{RS}_t - \text{RS}_{t-5}}{\text{RS}_{t-5}}$$
-          Insieme a $\text{RSI}_{14}$, $\text{RSI}_7$, $\text{MACD}_{\text{Hist}}$, $\text{Vol}_{\text{Ratio}}$ e $\text{ATR}_{\text{Pctile}}$.
-        * **Prevenzione del Data Leakage:** Split temporale 80/20 con `StandardScaler` calcolato rigorosamente **solo sul Training Set**.
-
-        ### 3. Sentiment Finanziario Potenziato (NLP)
-        Combina l'analisi di polarità lessicale con un dizionario di boost semantico finanziario mirato ($+0.25$ per termini rialzisti come *beat, surge, record*, $-0.25$ per termini ribassisti come *miss, crash, lawsuit*), pesato per l'affidabilità delle fonti giornalistiche istituzionali.
-
-        ### 4. Metriche Istituzionali di Rischio
         * **Sortino Ratio:**
           $$\text{Sortino} = \frac{\mathbb{E}[R_t] - R_f}{\sqrt{\frac{1}{N}\sum_{R_t < 0} (R_t - R_f)^2}} \cdot \sqrt{252}$$
-        * **Maximum Drawdown Storico (Max DD):**
-          $$\text{MDD} = \max_{\tau \in (0, T)} \left( \frac{\max_{t \in (0, \tau)} P_t - P_\tau}{\max_{t \in (0, \tau)} P_t} \right) \cdot 100$$
+        * **Maximum Drawdown (MDD):**
+          $$ \text{MDD} = \max_{\tau \in (0, T)} \left( \frac{\max_{t \in (0, \tau)} P_t - P_\tau}{\max_{t \in (0, \tau)} P_t} \right) \cdot 100 $$
         """)
