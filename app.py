@@ -17,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# STILE CSS "LIQUID GLASS" SEQUENZIALE E PROPORZIONATO
+# STILE CSS "LIQUID GLASS" CON TITOLI UNIFORMI
 st.markdown("""
     <style>
     .metric-card {
@@ -70,12 +70,6 @@ st.markdown("""
             border: 1px solid rgba(255, 255, 255, 0.1);
             color: #e2e8f0;
         }
-    }
-    h1 {
-        font-size: 1.2rem !important;
-        font-weight: 600 !important;
-        margin: 0 !important;
-        padding: 0 !important;
     }
     .metric-label {
         font-size: 11px;
@@ -311,8 +305,8 @@ def calcola_modello_ml_e_backtest(df, sentiment_score, horizon):
     dettagli = []
     return prob, verdetto, colore, sl_val, sl_pct, tp_val, tp_pct, risk_reward, win_rate, is_macro_bull, dettagli
 
-# UI PRINCIPALE
-st.markdown("<h1>Institutional Market Terminal</h1>", unsafe_allow_html=True)
+# UI PRINCIPALE (TITOLO UNIFORME)
+st.subheader("Trading Tikitò")
 st.write("")
 
 # 1. SCELTA TICKER & ORIZZONTE
@@ -430,7 +424,7 @@ if ticker:
         </div>
     """, unsafe_allow_html=True)
 
-    # 6. BLOCCO VALORI DI PREZZO, STOP LOSS, TAKE PROFIT E PERCENTUALI (Valori in Euro)
+    # 6. BLOCCO VALORI DI PREZZO, STOP LOSS, TAKE PROFIT E PERCENTUALI
     k1, k2, k3, k4 = st.columns(4)
     with k1:
         ch_color = '#238636' if change_pct >= 0 else '#da3633'
@@ -466,9 +460,9 @@ if ticker:
             </div>
         """, unsafe_allow_html=True)
 
-    # 7. BLOCCO SIMULAZIONE POSITION SIZING & GESTIONE TRADE (CON INPUT NUMERICI IN EURO)
+    # 7. BLOCCO SIMULAZIONE POSITION SIZING (TITOLO UNIFORME, INPUT NUMERICI)
     st.write("")
-    st.markdown("### ⚙️ Simulatore di Posizione & Rischio (Valori in Euro)")
+    st.subheader("Simulazione")
     
     col_s1, col_s2 = st.columns(2)
     with col_s1:
@@ -476,7 +470,6 @@ if ticker:
     with col_s2:
         user_risk_pct = st.number_input("Massima Perdita su Stop Loss (%):", min_value=0.1, max_value=10.0, value=1.0, step=0.1)
 
-    # Calcoli matematici simulatore
     max_loss_allowed = user_budget * (user_risk_pct / 100.0)
     price_distance_sl = abs(last_price - sl_val)
     
@@ -487,7 +480,6 @@ if ticker:
         
     position_total_value = recommended_shares * last_price
     stop_loss_eur_actual = recommended_shares * price_distance_sl
-    
     price_distance_tp = abs(tp_val - last_price)
     expected_profit_eur = recommended_shares * price_distance_tp
 
@@ -544,8 +536,7 @@ if ticker:
         curr_row += 1
 
     if "MACD" in ind_options:
-        fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], line=dict(color='#38bdf8', width=1.2), name='MACD'), row=curr_row, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], line=dict(color='#f97316', width=1.2), name='Signal'), row=curr_row, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], line=dict(color='#38bdf8', width=1.2), name='MACD'), row=fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], line=dict(color='#f97316', width=1.2), name='Signal'), row=curr_row, col=1), row=curr_row, col=1) # Correzione inline tracciamento MACD
         curr_row += 1
 
     fig.update_layout(
@@ -589,48 +580,38 @@ if ticker:
     else:
         st.info("Nessuna notizia recente.")
 
-    # GUIDA ACCADEMICA E CAPITOLO PRATICO ESECUTIVO
+    # GUIDA ACCADEMICA E MAPPA ARCHITETTURALE APPROFONDITA
     st.write("")
-    with st.expander("📖 Guida ai Risultati, Flusso Operativo e Masterplan 200€/Mese (Position Sizing 1%)"):
+    with st.expander("📖 Guida ai Risultati, Flusso Logico-Matematico e Masterplan 200€/Mese"):
         st.markdown(r"""
-        ### 1. Capitolo Pratico: Il Masterplan dei 200€/Mese e Regola dell'1%
-        Per centrare l'obiettivo di guadagno netto costante senza correre rischi sproporzionati, l'operatività segue un rigido protocollo matematico:
-
-        * **Regola del Rischio Massimo (1% del Capitale):**
-          In ogni singolo trade, la perdita massima accettata se il prezzo tocca lo Stop Loss non deve **mai superare l'1% del tuo capitale totale**. 
-          * *Esempio con Conto di 2.000€:* Il rischio massimo ammesso per trade è di **20€**.
-        
-        * **Formula per Calcolare quante Azioni Comprare (Position Sizing):**
-          $$\text{Quantità di Azioni} = \frac{\text{Budget di Rischio in Denaro (es. 20€)}}{\text{Distanza in euro tra Prezzo di Ingresso e Stop Loss (ATR)}}$$
-          * *Esempio pratico:* Compri un titolo a €100. Il terminale calcola lo Stop Loss a €98 (distanza di €2). Rischendo €20, compri esattamente **10 azioni** (€20 / €2 = 10). Se il mercato va contro, perdi esattamente €20 e chiudi la posizione in sicurezza.
-
-        * **Flusso Operativo Intraday (`1D`) vs Swing 3 Giorni (`3D`):**
-          * **Strategia 3D (Consigliata):** Apri la posizione verificando che il Check Iniziale sia verde, il Macro Trend sia 🟢 *Bullish (Sopra SMA200)* e la Confluenza Quantitativa sia positiva. Tieni la posizione per 3 giorni o fino al raggiungimento del Take Profit.
-          * **Strategia Intraday (`1D`):** Da usare esclusivamente su titoli ad altissima liquidità (es. Big Tech). Chiudi obbligatoriamente ogni posizione prima della chiusura della sessione per azzerare il rischio overnight.
+        ### 1. Masterplan Operativo e Gestione del Rischio (La Regola dell'1%)
+        Il terminale nasce per consentire una crescita costante del capitale mirando a una rendita mensile sostenibile (es. 200-300€). Per fare questo, la disciplina di esecuzione è più importante della predizione:
+        * **Rischio Massimo per Trade (1%):** Non rischiare mai più dell'1% del tuo capitale totale in una singola operazione. Con un conto di 2.000€, la perdita massima ammessa in caso di stop loss è di 20€.
+        * **Calcolo della Size (Position Sizing):** Il simulatore divide il budget di rischio in denaro per la distanza esatta in euro tra il prezzo d'ingresso e lo Stop Loss basato sull'ATR, restituendo il numero esatto di azioni da acquistare.
 
         ---
 
-        ### 2. Guida ai KPI e Bande di Valutazione
-        * **Check Iniziale (Liquidità & Volatilità):**
-          * 🟢 **Liquido & Ideale:** Volume $>500\text{K}$ e ATR tra $1.5\%$ e $3.5\%$.
-          * 🔴 **Attenzione:** Volumi bassi o ATR estremi (<1.5% o >3.5%).
-        * **Macro Trend Gatekeeper:** Se sopra la SMA200 (verde), i segnali Long sono autorizzati. Sotto la SMA200 (rosso), blocco di protezione attivo.
-        * **ML Signal & Probabilità di Rialzo (Gradient Boosting):**
-          * 🟢 **Banda Ottimale per BUY ($P \ge 62\%$):** Alta confidenza statistica out-of-sample.
-          * 🟡 **Banda Neutra / HOLD ($38\% < P < 62\%$):** Indecisione stocastica. Nessuna operazione.
-          * 🔴 **Banda Critica per SELL ($P \le 38\%$):** Alta probabilità di storno.
-        * **Backtest Net Win Rate:** Ottimale se $\ge 55\%$ (al netto dei costi di transazione).
-        * **R/R Ratio:** Ottimale se $\ge 1 : 1.5$.
+        ### 2. Mappa Logica e Architetturale: Cosa gira sotto il cofano?
+        Per interpretare correttamente i dati forniti dal terminale, è necessario comprendere la sequenza di calcolo e i modelli matematici implementati:
 
-        ---
+        * **A. Il Pre-Flight Check (Filtri di Ingresso):**
+          * *Liquidità (Volume Medio 20D):* Viene calcolata la media mobile a 20 periodi dei volumi scambiati. Se il volume supera 500.000 unità, l'asset è altamente liquido, garantendo l'assenza di slippage anomali in esecuzione.
+          * *Volatilità (ATR %):* L'Average True Range (ATR) viene rapportato al prezzo attuale per determinare l'escursione percentuale giornaliera. Valori compresi tra l'1.5% e il 3.5% indicano un asset dinamico ma controllato.
 
-        ### 3. Trattazione Matematica dell'Architettura
-        * **Modello Predittivo ($y_t$):**
-          $$y_t = \mathbb{I}\left( P_{t+h} > P_t \right)$$
-        * **Feature Stazionarie ($\mathbf{X}_t$):**
-          $$\text{Dist}_{\text{EMA}20} = \frac{P_t - \text{EMA}_{20}(P)}{\text{EMA}_{20}(P)} \cdot 100, \quad \text{RS}_{\text{Change}} = \frac{\text{RS}_t - \text{RS}_{t-5}}{\text{RS}_{t-5}}$$
-        * **Sortino Ratio:**
-          $$\text{Sortino} = \frac{\mathbb{E}[R_t] - R_f}{\sqrt{\frac{1}{N}\sum_{R_t < 0} (R_t - R_f)^2}} \cdot \sqrt{252}$$
-        * **Maximum Drawdown (MDD):**
-          $$ \text{MDD} = \max_{\tau \in (0, T)} \left( \frac{\max_{t \in (0, \tau)} P_t - P_\tau}{\max_{t \in (0, \tau)} P_t} \right) \cdot 100 $$
+        * **B. Il Macro Trend Gatekeeper (Filtro SMA200):**
+          * Il terminale estrae dinamicamente il benchmark di riferimento dell'asset (es. NASDAQ per i titoli tech, S&P 500 per le blue chip generaliste, FTSE MIB per i titoli italiani) e calcola la media mobile a 200 giorni ($SMA_{200}$).
+          * *Logica:* Se il prezzo del benchmark si trova sotto la $SMA_{200}$ ($P < SMA_{200}$), il mercato globale è in regime di Bear Market. In questa fase, il sistema blocca automaticamente qualsiasi segnale di acquisto (`BUY`), forzando una protezione difensiva (`HOLD`).
+
+        * **C. Il Modello di Machine Learning (Gradient Boosting & Zero Data Leakage):**
+          * *Addestramento Storico:* Il sistema utilizza un ensemble di alberi decisionali sequenziali (`GradientBoostingClassifier`) addestrato su 5 anni di dati storici giornalieri ($N \approx 1250$ barre).
+          * *Target Predittivo ($y_t$):* Il modello non cerca di indovinare la direzione generica, ma calcola la probabilità statistica che il prezzo a un orizzonte futuro $h$ ($1, 3$ o $7$ giorni) sia superiore al prezzo odierno:
+            $$y_t = \mathbb{I}\left( P_{t+h} > P_t \right)$$
+          * *Feature Stazionarie ($\mathbf{X}_t$):* Per evitare distorsioni temporali, vengono impiegate feature normalizzate e stazionarie:
+            $$\text{Dist}_{\text{EMA}20} = \frac{P_t - \text{EMA}_{20}(P)}{\text{EMA}_{20}(P)} \cdot 100, \quad \text{RS}_{\text{Change}} = \frac{\text{RS}_t - \text{RS}_{t-5}}{\text{RS}_{t-5}}$$
+            Insieme a $\text{RSI}_{14}$, $\text{RSI}_7$, $\text{MACD}_{\text{Hist}}$, $\text{Vol}_{\text{Ratio}}$ e $\text{ATR}_{\text{Pctile}}$.
+          * *Prevenzione del Data Leakage:* Il dataset viene diviso rigorosamente (80% training, 20% test). Lo `StandardScaler` viene calcolato **unicamente sul Training Set** ed applicato per proiezione al Test Set, azzerando qualsiasi contaminazione futura.
+
+        * **D. Backtest Net Win Rate & Sentiment NLP:**
+          * Sul Test Set out-of-sample viene eseguito un backtest vettorizzato che misura l'accuratezza storica delle predizioni, applicando una decurtazione conservativa (-3.5%) per simulare le commissioni di transazione e lo slippage reale.
+          * Viene integrata un'analisi di sentiment sulle notizie web istituzionali (Reuters, Bloomberg, ecc.) convertendo la polarità testuale tramite TextBlob e dizionari finanziari ponderati, aggiungendo un boost o una penalizzazione alla probabilità finale del modello.
         """)
