@@ -499,7 +499,7 @@ if ticker:
         </div>
     """, unsafe_allow_html=True)
 
-    # 8. GRAFICO & INDICATORI (MACD CORRETTO E SENZA DUPLICAZIONE DI ARGOMENTI)
+    # 8. GRAFICO & INDICATORI
     st.write("")
     st.subheader("Grafico & Indicatori")
     
@@ -581,38 +581,54 @@ if ticker:
     else:
         st.info("Nessuna notizia recente.")
 
-    # GUIDA ACCADEMICA E MAPPA ARCHITETTURALE APPROFONDITA
+    # MANUALI ED ENCICLOPEDIA STRUTTURATA (GUIDA UFFICIALE)
     st.write("")
-    with st.expander("📖 Guida ai Risultati, Flusso Logico-Matematico e Masterplan 200€/Mese"):
+    with st.expander("📖 Guida e Manuale Enciclopedico Ufficiale (Trading Tikitò)"):
         st.markdown(r"""
-        ### 1. Masterplan Operativo e Gestione del Rischio (La Regola dell'1%)
-        Il terminale nasce per consentire una crescita costante del capitale mirando a una rendita mensile sostenibile (es. 200-300€). Per fare questo, la disciplina di esecuzione è più importante della predizione:
-        * **Rischio Massimo per Trade (1%):** Non rischiare mai più dell'1% del tuo capitale totale in una singola operazione. Con un conto di 2.000€, la perdita massima ammessa in caso di stop loss è di 20€.
-        * **Calcolo della Size (Position Sizing):** Il simulatore divide il budget di rischio in denaro per la distanza esatta in euro tra il prezzo d'ingresso e lo Stop Loss basato sull'ATR, restituendo il numero esatto di azioni da acquistare.
+        Benvenuto nel manuale enciclopedico ufficiale del terminale. Questa sezione sviscera l'intera architettura logica, matematica e operativa del software per consentirti di interpretare ogni singolo dato con precisione chirurgica.
 
         ---
 
-        ### 2. Mappa Logica e Architetturale: Cosa gira sotto il cofano?
-        Per interpretare correttamente i dati forniti dal terminale, è necessario comprendere la sequenza di calcolo e i modelli matematici implementati:
+        ### 1. Masterplan Operativo: La Meta dei 200€ / 300€ Mensili
+        * **Obiettivo Economico:** Generare una rendita costante puntando a 10-12 operazioni vincenti al mese, con un profitto netto medio di 15€ - 20€ per trade.
+        * **Regola d'Oro del Rischio (1%):** Non rischiare mai più dell'**1%** del tuo capitale totale per singola operazione. Con un conto di 2.000€, la perdita massima ammessa su uno Stop Loss è di **20€**.
+        * **Position Sizing Automatico:** Il simulatore calcola le azioni da comprare dividendo il rischio in euro per la distanza dallo Stop Loss, azzerando l'emotività.
 
-        * **A. Il Pre-Flight Check (Filtri di Ingresso):**
-          * *Liquidità (Volume Medio 20D):* Viene calcolata la media mobile a 20 periodi dei volumi scambiati. Se il volume supera 500.000 unità, l'asset è altamente liquido, garantendo l'assenza di slippage anomali in esecuzione.
-          * *Volatilità (ATR %):* L'Average True Range (ATR) viene rapportato al prezzo attuale per determinare l'escursione percentuale giornaliera. Valori compresi tra l'1.5% e il 3.5% indicano un asset dinamico ma controllato.
+        ---
 
-        * **B. Il Macro Trend Gatekeeper (Filtro SMA200):**
-          * Il terminale estrae dinamicamente il benchmark di riferimento dell'asset (es. NASDAQ per i titoli tech, S&P 500 per le blue chip generaliste, FTSE MIB per i titoli italiani) e calcola la media mobile a 200 giorni ($SMA_{200}$).
-          * *Logica:* Se il prezzo del benchmark si trova sotto la $SMA_{200}$ ($P < SMA_{200}$), il mercato globale è in regime di Bear Market. In questa fase, il sistema blocca automaticamente qualsiasi segnale di acquisto (`BUY`), forzando una protezione difensiva (`HOLD`).
+        ### 2. Mappa Matematica del Flusso (Dall'Input all'Output)
+        Cosa succede esattamente quando inserisci un Ticker e premi invio? Il motore esegue una sequenza rigorosa in 6 fasi:
 
-        * **C. Il Modello di Machine Learning (Gradient Boosting & Zero Data Leakage):**
-          * *Addestramento Storico:* Il sistema utilizza un ensemble di alberi decisionali sequenziali (`GradientBoostingClassifier`) addestrato su 5 anni di dati storici giornalieri ($N \approx 1250$ barre).
-          * *Target Predittivo ($y_t$):* Il modello non cerca di indovinare la direzione generica, ma calcola la probabilità statistica che il prezzo a un orizzonte futuro $h$ ($1, 3$ o $7$ giorni) sia superiore al prezzo odierno:
-            $$y_t = \mathbb{I}\left( P_{t+h} > P_t \right)$$
-          * *Feature Stazionarie ($\mathbf{X}_t$):* Per evitare distorsioni temporali, vengono impiegate feature normalizzate e stazionarie:
-            $$\text{Dist}_{\text{EMA}20} = \frac{P_t - \text{EMA}_{20}(P)}{\text{EMA}_{20}(P)} \cdot 100, \quad \text{RS}_{\text{Change}} = \frac{\text{RS}_t - \text{RS}_{t-5}}{\text{RS}_{t-5}}$$
-            Insieme a $\text{RSI}_{14}$, $\text{RSI}_7$, $\text{MACD}_{\text{Hist}}$, $\text{Vol}_{\text{Ratio}}$ e $\text{ATR}_{\text{Pctile}}$.
-          * *Prevenzione del Data Leakage:* Il dataset viene diviso rigorosamente (80% training, 20% test). Lo `StandardScaler` viene calcolato **unicamente sul Training Set** ed applicato per proiezione al Test Set, azzerando qualsiasi contaminazione futura.
+        1. **Fase di Ingestion Dati:** 
+           Il sistema scarica 5 anni di dati storici giornalieri ($N \approx 1250$ candele) tramite le API di `yfinance` per l'asset e per il suo peer macro di riferimento (es. Indice NASDAQ `^NDX` per le Big Tech).
+        2. **Fase di Pre-Flight Check (Filtri di Ingresso):**
+           * *Liquidità ($V_{20}$):* Calcola la media mobile a 20 periodi dei volumi. Formula: $V_{20} = \frac{1}{20}\sum_{i=0}^{19} Vol_{t-i}$. Soglia minima ottimale: $> 500.000$ azioni/unità.
+           * *Volatilità ($ATR\%$):* Calcola l'Average True Range a 14 periodi rapportato al prezzo. Formula: $\text{ATR}\% = (\text{ATR}_{14} / P_t) \cdot 100$. Range ideale: $1.5\% \le \text{ATR}\% \le 3.5\%$.
+        3. **Fase di Filtraggio Macro (Gatekeeper SMA200):**
+           Il sistema valuta il benchmark di mercato. Calcola la media mobile a 200 giorni: $\text{SMA}_{200} = \frac{1}{200}\sum_{i=0}^{199} P_{\text{bench}, t-i}$. Se $P_{\text{bench}} < \text{SMA}_{200}$, il mercato è in Bear Market e qualsiasi segnale `BUY` viene intercettato e bloccato d'ufficio per protezione.
+        4. **Fase di Machine Learning Predittivo (Gradient Boosting):**
+           * *Target ($y_t$):* Il modello impara a classificare la probabilità di rialzo a un orizzonte temporale $h$ ($1, 3$ o $7$ giorni):
+             $$y_t = \mathbb{I}\left( P_{t+h} > P_t \right)$$
+           * *Feature Stazionarie ($\mathbf{X}_t$):* Vengono immesse 7 feature purificate da trend lineari (distanze percentuali da EMA20, variazioni di forza relativa $\text{RS}_{\text{Change}}$, $\text{RSI}_{14}$, $\text{RSI}_7$, $\text{MACD}_{\text{Hist}}$, $\text{Vol}_{\text{Ratio}}$ e $\text{ATR}_{\text{Pctile}}$).
+           * *Zero Data Leakage:* Il dataset viene diviso (80% training, 20% test). Lo `StandardScaler` viene fittato **solo sul Training Set** ($\mu_{\text{train}}, \sigma_{\text{train}}$) ed applicato per proiezione al Test Set.
+        5. **Fase di Integrazione Sentiment & Backtest Netto:**
+           * Il sentiment delle prime 10 notizie web globali viene analizzato tramite TextBlob e dizionari finanziari ponderati ($score \in [-1, 1]$), modificando dinamicamente la probabilità predittiva del modello.
+           * Il backtest out-of-sample calcola l'accuratezza storica delle predizioni, applicando una decurtazione cautelativa del **-3.5%** per simulare commissioni e slippage reali (Net Win Rate).
+        6. **Fase di Uscita e Rischio/Premio:**
+           Vengono calcolati i livelli dinamici di Stop Loss e Take Profit basati sui multipli dell'ATR, restituendo il rapporto asimmetrico di Rischio/Premio ($R/R$).
 
-        * **D. Backtest Net Win Rate & Sentiment NLP:**
-          * Sul Test Set out-of-sample viene eseguito un backtest vettorizzato che misura l'accuratezza storica delle predizioni, applicando una decurtazione conservativa (-3.5%) per simulare le commissioni di transazione e lo slippage reale.
-          * Viene integrata un'analisi di sentiment sulle notizie web istituzionali (Reuters, Bloomberg, ecc.) convertendo la polarità testuale tramite TextBlob e dizionari finanziari ponderati, aggiungendo un boost o una penalizzazione alla probabilità finale del modello.
+        ---
+
+        ### 3. Definizione delle Variabili, Range e Guide Pratiche per l'Utente
+        Di seguito trovi la tabella enciclopedica dei parametri chiave da monitorare nel terminale:
+
+        | Indicatore / Variabile | Descrizione Tecnica | Range Ottimale (Verde) | Range di Allerta (Giallo/Rosso) | Azione Consigliata |
+        | :--- | :--- | :--- | :--- | :--- |
+        | **Liquidità 20D** | Volume medio giornaliero scambiato | $> 500\text{K}$ azioni | $\le 500\text{K}$ azioni | Evitare se basso per prevenire slippage |
+        | **ATR %** | Volatilità percentuale giornaliera | $1.5\% \div 3.5\%$ | $< 1.5\%$ (Piatto) o $> 3.5\%$ (Estremo) | Evitare asset troppo fermi o troppo volatili |
+        | **Macro Trend** | Posizione del prezzo rispetto alla SMA200 | Sopra la SMA200 (Bullish) | Sotto la SMA200 (Bearish) | Non aprire mai posizioni Long se Bearish |
+        | **Probabilità ML** | Score predittivo del Gradient Boosting | $\ge 62.0\%$ | $38.0\% \div 61.9\%$ (Hold) o $\le 38\%$ (Sell) | Eseguire BUY solo se $\ge 62\%$ |
+        | **Net Win Rate** | Accuratezza storica post-costi | $\ge 55.0\%$ | $< 48.0\%$ | Misura il vantaggio statistico reale |
+        | **R/R Ratio** | Rapporto tra guadagno potenziale e rischio | $\ge 1 : 1.5$ | $< 1 : 1.2$ | Conferma l'asimmetria economica del trade |
+        | **Sortino Ratio** | Rendimento corretto per il rischio negativo | $> 1.5$ | $< 1.0$ | Misura la qualità dei guadagni storici |
         """)
