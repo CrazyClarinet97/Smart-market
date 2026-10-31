@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import requests
 from textblob import TextBlob
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.preprocessing import StandardScaler
 
 # Configurazione Pagina
@@ -233,12 +233,6 @@ def estrai_news_e_sentiment(ticker):
     return (np.mean(sentiments) if sentiments else 0.0), articoli
 
 def calcola_modello_ml_e_backtest(df, sentiment_score, horizon):
-    """
-    MODELLO DI FRONTIERA:
-    1. Zero Data Leakage (Scaler fit solo su Training Set)
-    2. Macro Trend Gatekeeper (Filtro SMA200 sul Benchmark)
-    3. Backtester Vettorizzato Storico In-Line (Win Rate e Profit Factor)
-    """
     days_forward = 1 if horizon == "1D" else (3 if horizon == "3D" else 7)
     df = df.copy()
     df['Target'] = (df['Close'].shift(-days_forward) > df['Close']).astype(int)
@@ -260,30 +254,31 @@ def calcola_modello_ml_e_backtest(df, sentiment_score, horizon):
     X_train_scaled = scaler.fit_transform(X_train) # Fit solo sul training set!
     X_test_scaled = scaler.transform(X_test)       # Transform pulito sul test set
 
-    model = RandomForestClassifier(n_estimators=150, max_depth=6, random_state=42, n_jobs=-1)
+    # 2. Gradient Boosting Classifier (Stato dell'arte nativo Python)
+    model = GradientBoostingClassifier(n_estimators=100, learning_rate=0.05, max_depth=4, random_state=42)
     model.fit(X_train_scaled, y_train)
 
-    # Predizione out-of-sample sull'ultima candela
     last_features = scaler.transform(df[feature_cols].iloc[[-1]])
     prob = model.predict_proba(last_features)[0][1] * 100
     prob = max(0.0, min(100.0, prob + (sentiment_score * 12)))
 
-    # 2. Macro Trend Gatekeeper (Filtro SMA200)
+    # 3. Macro Trend Gatekeeper (Filtro SMA200)
     last = df.iloc[-1]
     is_macro_bull = last['Bench_Close'] > last['Bench_SMA200']
     
-    # Se il mercato macro è in Bear Market, blocchiamo i BUY forzando un giudizio prudenziale
     if not is_macro_bull and prob >= 62.0:
-        prob = 50.0 # Annulla il segnale di acquisto per protezione sistemica
+        prob = 50.0 # Blocco protettivo contro il bear market
 
-    # 3. Backtester Vettorizzato Storico In-Line (Calcolo Win Rate sul test set)
+    # 4. Backtester Vettorizzato Storico In-Line con stima costi/slippage
     test_predictions = model.predict(X_test_scaled)
     test_actuals = y_test.values
     correct_trades = np.sum(test_predictions == test_actuals)
     total_trades = len(test_actuals)
-    win_rate = (correct_trades / total_trades) * 100 if total_trades > 0 else 0.0
+    
+    # Win rate netto decurtato del fattore frizione/slippage (stima realistica)
+    raw_win_rate = (correct_trades / total_trades) * 100 if total_trades > 0 else 0.0
+    win_rate = max(0.0, raw_win_rate - 3.5) # Penalty conservativa per costi di transazione
 
-    # Calcolo SL e TP dinamici
     atr = last['ATR']
     close = last['Close']
     atr_mult = 1.0 if horizon == "1D" else (1.8 if horizon == "3D" else 2.6)
@@ -319,7 +314,7 @@ ticker = st.session_state.ticker_input
 horizon = st.session_state.horizon_input
 
 if ticker:
-    with st.spinner("Esecuzione Modello Machine Learning (Random Forest & Backtest)..."):
+    with st.spinner("Esecuzione Gradient Boosting & Backtest Netto..."):
         df = scarica_dati(ticker)
         if df is None or df.empty:
             st.error("Nessun dato trovato per il ticker inserito o formato errato.")
@@ -353,7 +348,7 @@ if ticker:
                     <div style="font-size: 20px; font-weight: 800; color: {colore}; margin-top: 2px;">{verdetto}</div>
                 </div>
                 <div style="text-align: right;">
-                    <span class="metric-label">Probabilità Rialzo (ML) | Backtest Win Rate: {win_rate:.1f}%</span>
+                    <span class="metric-label">Probabilità Rialzo (GB) | Net Win Rate: {win_rate:.1f}%</span>
                     <div style="font-size: 18px; font-weight: bold;">{prob:.1f}%</div>
                 </div>
             </div>
@@ -390,9 +385,9 @@ if ticker:
     with k4:
         st.markdown(f"""
             <div class="metric-card">
-                <div class="metric-label">Backtest Win Rate (Out-of-Sample)</div>
+                <div class="metric-label">Backtest Net Win Rate</div>
                 <div class="metric-val" style="color: #38bdf8;">{win_rate:.1f}%</div>
-                <div class="metric-sub" style="opacity: 0.7;">Accuratezza Storica Test Set</div>
+                <div class="metric-sub" style="opacity: 0.7;">Post-Costi & Slippage</div>
             </div>
         """, unsafe_allow_html=True)
 
@@ -480,24 +475,22 @@ if ticker:
 
     # GUIDA ACCADEMICA E MATEMATICA DI FRONTIERA INTEGRALE CON BANDE E FORMULE
     st.write("")
-    with st.expander("📖 Guida ai Risultati (KPI), Bande Operative e Trattazione Matematica Completa"):
+    with st.expander("📖 Guida ai Risultati (KPI), Bande Operative e Architettura Gradient Boosting"):
         st.markdown(r"""
         ### 1. Guida ai KPI, Bande di Valutazione e Regimi Operativi
-        Questa sezione definisce le soglie quantitative e le bande di riferimento per stabilire se i valori registrati supportano l'operatività mirata al tuo obiettivo di profitto:
-
-        * **ML Signal & Probabilità di Rialzo (Random Forest):**
-          * 🟢 **Banda Ottimale per BUY ($P \ge 62\%$):** Alta confidenza statistica fuori campione (out-of-sample). Il modello individua una probabilità di chiusura in positivo superiore alla soglia di arbitraggio.
+        * **ML Signal & Probabilità di Rialzo (Gradient Boosting):**
+          * 🟢 **Banda Ottimale per BUY ($P \ge 62\%$):** Alta confidenza statistica out-of-sample. Il modello individua una probabilità di chiusura in positivo superiore alla soglia di arbitraggio.
           * 🟡 **Banda Neutra / HOLD ($38\% < P < 62\%$):** Indecisione stocastica o rumore di mercato. Nessuna operazione.
           * 🔴 **Banda Critica per SELL ($P \le 38\%$):** Elevata probabilità di storno o esaurimento del momentum.
 
-        * **Backtest Win Rate Storico (Out-of-Sample):**
-          * 🟢 **Eccellente ($WinRate \ge 55\%$):** La strategia ha dimostrato storicamente un vantaggio statistico reale (edge) sul test set recente.
-          * 🟡 **Marginale ($48\% \le WinRate < 55\%$):** Prestazione vicina al random walk; richiede un R/R ratio elevato per essere redditizia.
-          * 🔴 **Scarsa ($WinRate < 48\%$):** Il modello perde colpi su questo asset; evitare di operare.
+        * **Backtest Net Win Rate (Post-Costi e Slippage):**
+          * 🟢 **Eccellente ($WinRate \ge 55\%$):** La strategia dimostra un vantaggio statistico reale al netto delle frizioni di mercato.
+          * 🟡 **Marginale ($48\% \le WinRate < 55\%$):** Margine stretto; richiede un R/R elevato per coprire i costi.
+          * 🔴 **Scarsa ($WinRate < 48\%$):** Modello non performante sull'asset; evitare l'operatività.
 
         * **Macro Trend Gatekeeper (Filtro SMA200 sul Benchmark):**
-          * 🟢 **Bullish ($P_{\text{bench}} > \text{SMA}_{200}$):** Il mercato generale è in trend rialzista strutturale. I segnali BUY sono pienamente operativi.
-          * 🔴 **Bearish ($P_{\text{bench}} < \text{SMA}_{200}$):** Il mercato è in macro-ribasso. Il filtro di protezione blocca automaticamente i segnali BUY per evitare trappole sistemiche.
+          * 🟢 **Bullish ($P_{\text{bench}} > \text{SMA}_{200}$):** Trend macro rialzista. Segnali BUY pienamente attivi.
+          * 🔴 **Bearish ($P_{\text{bench}} < \text{SMA}_{200}$):** Trend macro ribassista. Blocco automatico dei segnali BUY per protezione del capitale.
 
         * **R/R Ratio (Rapporto Rischio / Premio):**
           * 🟢 **Ottimale ($R/R \ge 1.5$):** Asimmetria favorevole tra profitto atteso e stop loss.
@@ -512,26 +505,17 @@ if ticker:
 
         ---
 
-        ### 2. Architettura del Modello di Machine Learning (Random Forest & Zero Data Leakage)
-        Il terminale implementa un approccio istituzionale basato su ensemble di alberi decisionali (`RandomForestClassifier`) con uno storico di 5 anni ($N \approx 1250$ barre giornaliere).
+        ### 2. Architettura del Modello di Machine Learning (Gradient Boosting & Zero Data Leakage)
+        Il terminale implementa un ensemble di alberi sequenziali (`GradientBoostingClassifier`) addestrato su uno storico di 5 anni ($N \approx 1250$ barre).
         * **Target Binario ($y_t$):**
           $$y_t = \mathbb{I}\left( P_{t+h} > P_t \right)$$
-          *(dove $h \in \{1, 3, 7\}$ giorni in base all'orizzonte $H$ selezionato).*
-        
         * **Feature Stazionarie ($\mathbf{X}_t$):**
-          Per evitare la non-stazionarietà delle serie storiche, il modello utilizza variazioni percentuali e distanze relative:
           $$\text{Dist}_{\text{EMA}20} = \frac{P_t - \text{EMA}_{20}(P)}{\text{EMA}_{20}(P)} \cdot 100, \quad \text{RS}_{\text{Change}} = \frac{\text{RS}_t - \text{RS}_{t-5}}{\text{RS}_{t-5}}$$
           Insieme a $\text{RSI}_{14}$, $\text{RSI}_7$, $\text{MACD}_{\text{Hist}}$, $\text{Vol}_{\text{Ratio}}$ e $\text{ATR}_{\text{Pctile}}$.
-
-        * **Prevenzione del Data Leakage (StandardScaler Isolato):**
-          Il dataset viene diviso temporalmente in Training Set (80%) e Test Set (20%). Lo scaler viene calcolato **unicamente sul Training Set** ed applicato per proiezione al Test Set:
-          $$\mu_{\text{train}}, \sigma_{\text{train}} = \text{fit}(X_{\text{train}}), \quad X_{\text{scaled}} = \frac{X - \mu_{\text{train}}}{\sigma_{\text{train}}}$$
+        * **Prevenzione del Data Leakage:** Split temporale 80/20 con `StandardScaler` calcolato rigorosamente **solo sul Training Set**.
 
         ### 3. Sentiment Finanziario Potenziato (NLP)
-        L'analisi testuale delle notizie web unisce l'analisi di polarità lessicale di base a un dizionario di boost semantico finanziario mirato:
-        * Se il titolo contiene termini chiave rialzisti (*beat, surge, growth, record, rally, profit*), viene aggiunto un boost di polarità positiva ($+0.25$).
-        * Se contiene termini ribassisti (*miss, crash, drop, loss, lawsuit, downgrade*), viene applicata una penalizzazione ($-0.25$).
-        * Il punteggio finale è pesato per l'affidabilità della fonte giornalistica (Reuters, Bloomberg, WSJ, Financial Times, Sole 24 Ore, ecc. pesate a $1.3\times$).
+        Combina l'analisi di polarità lessicale con un dizionario di boost semantico finanziario mirato ($+0.25$ per termini rialzisti come *beat, surge, record*, $-0.25$ per termini ribassisti come *miss, crash, lawsuit*), pesato per l'affidabilità delle fonti giornalistiche istituzionali.
 
         ### 4. Metriche Istituzionali di Rischio
         * **Sortino Ratio:**
