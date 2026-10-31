@@ -17,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# STILE CSS "LIQUID GLASS" AGGIORNATO PER ALLINEAMENTO PULITO
+# STILE CSS "LIQUID GLASS" SEQUENZIALE E PROPORZIONATO
 st.markdown("""
     <style>
     .metric-card {
@@ -361,7 +361,7 @@ if ticker:
         </div>
     """, unsafe_allow_html=True)
 
-    # 2. BLOCCO CHECK INIZIALE (RIGOROSAMENTE SU LINEE SEPARATE)
+    # 2. BLOCCO CHECK INIZIALE
     liq_color_badge = "#238636" if check_liq_ok else "#da3633"
     vol_color_badge = "#238636" if check_vol_ok else ("#d29922" if atr_pct < 1.5 else "#da3633")
     
@@ -379,7 +379,7 @@ if ticker:
         </div>
     """, unsafe_allow_html=True)
 
-    # 3. BLOCCO MACRO TREND (RIGOROSAMENTE SU LINEE SEPARATE)
+    # 3. BLOCCO MACRO TREND
     macro_border_color = "#238636" if is_macro_bull else "#da3633"
     macro_text = "Bullish (Sopra SMA200 - OK)" if is_macro_bull else "Bearish (Sotto SMA200 - Blocco)"
     st.markdown(f"""
@@ -395,7 +395,7 @@ if ticker:
         </div>
     """, unsafe_allow_html=True)
 
-    # 4. BLOCCO CONFLUENZA QUANTITATIVA (RIGOROSAMENTE SU LINEE SEPARATE)
+    # 4. BLOCCO CONFLUENZA QUANTITATIVA
     conf_ok = prob >= 62.0 and win_rate >= 55.0 and risk_reward >= 1.5
     conf_border = "#238636" if conf_ok else "#d29922"
     conf_status_text = "CONFLUENZA PIENA (OK)" if conf_ok else "SOTTO SOGLIA"
@@ -466,7 +466,45 @@ if ticker:
             </div>
         """, unsafe_allow_html=True)
 
-    # 7. GRAFICO & INDICATORI
+    # 7. BLOCCO SIMULAZIONE POSITION SIZING & GESTIONE TRADE (SUBITO DOPO I PREZZI, PRIMA DEL GRAFICO)
+    st.write("")
+    st.markdown("### ⚙️ Simulatore di Posizione & Rischio (Position Sizing)")
+    
+    col_s1, col_s2 = st.columns(2)
+    with col_s1:
+        user_budget = st.number_input("Budget Capitale (€ / $):", min_value=100.0, max_value=100000.0, value=2000.0, step=100.0)
+    with col_s2:
+        user_risk_pct = st.slider("Massima Perdita su Stop Loss (%):", min_value=0.5, max_value=5.0, value=1.0, step=0.5)
+
+    # Calcoli matematici simulatore
+    max_loss_allowed = user_budget * (user_risk_pct / 100.0)
+    price_distance_sl = abs(last_price - sl_val)
+    
+    if price_distance_sl > 0:
+        recommended_shares = int(max_loss_allowed / price_distance_sl)
+    else:
+        recommended_shares = 0
+        
+    position_total_value = recommended_shares * last_price
+    price_distance_tp = abs(tp_val - last_price)
+    expected_profit = recommended_shares * price_distance_tp
+
+    st.markdown(f"""
+        <div class="flow-card" style="border-left: 5px solid #0284c7; margin-top: 10px;">
+            <div>
+                <div style="font-weight: 700; margin-bottom: 4px; color: #0284c7;">🎯 Risultato Simulazione Trade</div>
+                <div style="font-weight: 500;">• Massima Perdita Ammessa: <b>-${max_loss_allowed:.2f}</b></div>
+                <div style="font-weight: 500;">• Quantità Consigliata: <b style="color: #38bdf8;">{recommended_shares} Azioni</b> (Valore Posizione: ${position_total_value:.2f})</div>
+                <div style="font-weight: 500;">• Profitto Previsto a TP: <b style="color: #238636;">+${expected_profit:.2f}</b></div>
+            </div>
+            <div style="text-align: right;">
+                <span style="font-size: 10px; opacity: 0.7; text-transform: uppercase; display: block; margin-bottom: 2px;">Rischio / Premio</span>
+                <b style="color: #238636;">1 : {risk_reward:.1f}</b>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # 8. GRAFICO & INDICATORI
     st.write("")
     st.subheader("Grafico & Indicatori")
     
