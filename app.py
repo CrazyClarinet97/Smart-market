@@ -7,7 +7,7 @@ from plotly.subplots import make_subplots
 import requests
 from textblob import TextBlob
 
-# Configurazione Pagina & Layout Minimal Serio
+# Configurazione Pagina
 st.set_page_config(
     page_title="Market Terminal",
     page_icon="📈",
@@ -15,7 +15,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# STILE CSS PERSONALIZZATO (Minimal, Font ridotti, Dark Mode pulita)
+# STILE CSS (Minimal, Serio, Dark, Font compatti)
 st.markdown("""
     <style>
     .stApp {
@@ -24,15 +24,11 @@ st.markdown("""
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
     h1 {
-        font-size: 1.3rem !important;
+        font-size: 1.2rem !important;
         font-weight: 600 !important;
         color: #f3f4f6 !important;
-        margin-bottom: 0px !important;
-    }
-    h2, h3 {
-        font-size: 1rem !important;
-        font-weight: 600 !important;
-        color: #f3f4f6 !important;
+        margin: 0 !important;
+        padding: 0 !important;
     }
     .metric-card {
         background-color: #111827;
@@ -42,7 +38,7 @@ st.markdown("""
         margin-bottom: 8px;
     }
     .metric-value {
-        font-size: 17px;
+        font-size: 16px;
         font-weight: 700;
         color: #38bdf8;
     }
@@ -58,65 +54,69 @@ st.markdown("""
         border-color: #374151 !important;
         font-size: 13px !important;
     }
+    .stButton button {
+        background-color: #0284c7 !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 8px !important;
+        font-size: 12px !important;
+        font-weight: 500 !important;
+        width: 100%;
+        height: 38px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
+# Gestione Session State per evitare reset e sbalzi di focus
+if 'ticker_input' not in st.session_state:
+    st.session_state.ticker_input = "AAPL"
+if 'horizon_input' not in st.session_state:
+    st.session_state.horizon_input = "1D"
+
 # ---------------------------------------------------------
-# MOTORE DI CALCOLO TECNICO AVANZATO
+# FUNZIONI DI CALCOLO E DATI (CON CACHE)
 # ---------------------------------------------------------
+@st.cache_data(ttl=120)
+def scarica_dati(ticker):
+    df = yf.download(ticker, period="1y", interval="1d", progress=False)
+    if df.empty:
+        return None
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    return df
+
 def calcola_indicatori(df):
-    # Medie Mobili
     df['SMA20'] = df['Close'].rolling(window=20).mean()
     df['SMA50'] = df['Close'].rolling(window=50).mean()
     df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
 
-    # RSI (14 e 7)
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / (loss + 1e-9)
     df['RSI'] = 100 - (100 / (1 + rs))
 
-    gain7 = (delta.where(delta > 0, 0)).rolling(window=7).mean()
-    loss7 = (-delta.where(delta < 0, 0)).rolling(window=7).mean()
-    rs7 = gain7 / (loss7 + 1e-9)
-    df['RSI7'] = 100 - (100 / (1 + rs7))
-
-    # MACD
     ema12 = df['Close'].ewm(span=12, adjust=False).mean()
     ema26 = df['Close'].ewm(span=26, adjust=False).mean()
     df['MACD'] = ema12 - ema26
     df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
     df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
 
-    # Bande di Bollinger
     df['BB_Middle'] = df['SMA20']
     std = df['Close'].rolling(window=20).std()
     df['BB_Upper'] = df['BB_Middle'] + (std * 2)
     df['BB_Lower'] = df['BB_Middle'] - (std * 2)
 
-    # Stocastico
-    low14 = df['Low'].rolling(window=14).min()
-    high14 = df['High'].rolling(window=14).max()
-    df['Stoch_K'] = 100 * ((df['Close'] - low14) / (high14 - low14 + 1e-9))
-    df['Stoch_D'] = df['Stoch_K'].rolling(window=3).mean()
-
-    # ATR (Average True Range)
     tr1 = df['High'] - df['Low']
     tr2 = abs(df['High'] - df['Close'].shift())
     tr3 = abs(df['Low'] - df['Close'].shift())
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     df['ATR'] = tr.rolling(window=14).mean()
 
-    # Volume Ratio (Confronto volume odierno con media 20 giorni)
     df['Vol_SMA20'] = df['Volume'].rolling(window=20).mean()
     df['Vol_Ratio'] = df['Volume'] / (df['Vol_SMA20'] + 1e-9)
-
     return df
 
-# ---------------------------------------------------------
-# SENTIMENT WEB
-# ---------------------------------------------------------
 def estrai_news_e_sentiment(ticker):
     try:
         url = f"https://query2.finance.yahoo.com/v1/finance/search?q={ticker}"
@@ -124,8 +124,7 @@ def estrai_news_e_sentiment(ticker):
         response = requests.get(url, headers=headers).json()
         news_list = response.get('news', [])[:5]
         
-        sentiments = []
-        articoli = []
+        sentiments, articoli = [], []
         for item in news_list:
             title = item.get('title', '')
             link = item.get('link', '#')
@@ -135,21 +134,16 @@ def estrai_news_e_sentiment(ticker):
             sentiments.append(polarity)
             articoli.append({'title': title, 'link': link, 'publisher': publisher, 'score': polarity})
         
-        avg_sentiment = np.mean(sentiments) if sentiments else 0.0
-        return avg_sentiment, articoli
+        return (np.mean(sentiments) if sentiments else 0.0), articoli
     except:
         return 0.0, []
 
-# ---------------------------------------------------------
-# MODELLO PREDITTIVO MULTI-FATTORE
-# ---------------------------------------------------------
 def calcola_modello(df, sentiment_score, horizon):
     last = df.iloc[-1]
     prev = df.iloc[-2]
     dettagli = []
     score = 50
 
-    # RSI
     rsi = last['RSI']
     if rsi < 32:
         score += 15
@@ -159,26 +153,22 @@ def calcola_modello(df, sentiment_score, horizon):
         dettagli.append({"Fattore": "RSI (14)", "Impatto": "-15 pt", "Stato": f"Ipercomprato ({rsi:.1f})"})
     else:
         score += 5
-        dettagli.append({"Fattore": "RSI (14)", "Impatto": "+5 pt", "Stato": f"Neutro/Equilibrato ({rsi:.1f})"})
+        dettagli.append({"Fattore": "RSI (14)", "Impatto": "+5 pt", "Stato": f"Neutro ({rsi:.1f})"})
 
-    # Trend SMA50 & EMA20
     if last['Close'] > last['SMA50'] and last['Close'] > last['EMA20']:
         score += 15
         dettagli.append({"Fattore": "Trend Prezzo", "Impatto": "+15 pt", "Stato": "Sopra SMA50 e EMA20 (Rialzista)"})
     else:
         score -= 15
-        dettagli.append({"Fattore": "Trend Prezzo", "Impatto": "-15 pt", "Stato": "Sotto SMA50 (Debolezza strutturale)"})
+        dettagli.append({"Fattore": "Trend Prezzo", "Impatto": "-15 pt", "Stato": "Sotto SMA50 (Debole)"})
 
-    # Volumi
-    vol_ratio = last['Vol_Ratio']
-    if vol_ratio > 1.2 and last['Close'] > prev['Close']:
+    if last['Vol_Ratio'] > 1.2 and last['Close'] > prev['Close']:
         score += 10
-        dettagli.append({"Fattore": "Volumi", "Impatto": "+10 pt", "Stato": f"Volumi in aumento con prezzo in salita ({vol_ratio:.1f}x)"})
-    elif vol_ratio > 1.2 and last['Close'] < prev['Close']:
+        dettagli.append({"Fattore": "Volumi", "Impatto": "+10 pt", "Stato": "Volumi in aumento con prezzo in salita"})
+    elif last['Vol_Ratio'] > 1.2 and last['Close'] < prev['Close']:
         score -= 10
-        dettagli.append({"Fattore": "Volumi", "Impatto": "-10 pt", "Stato": f"Volumi di scarico elevati ({vol_ratio:.1f}x)"})
+        dettagli.append({"Fattore": "Volumi", "Impatto": "-10 pt", "Stato": "Volumi di scarico elevati"})
 
-    # MACD
     if last['MACD'] > last['MACD_Signal']:
         score += 10
         dettagli.append({"Fattore": "MACD", "Impatto": "+10 pt", "Stato": "Sopra la linea di segnale"})
@@ -186,7 +176,6 @@ def calcola_modello(df, sentiment_score, horizon):
         score -= 10
         dettagli.append({"Fattore": "MACD", "Impatto": "-10 pt", "Stato": "Sotto la linea di segnale"})
 
-    # Sentiment
     if sentiment_score > 0.05:
         score += 10
         dettagli.append({"Fattore": "News Sentiment", "Impatto": "+10 pt", "Stato": f"Positivo (+{sentiment_score:.2f})"})
@@ -196,7 +185,6 @@ def calcola_modello(df, sentiment_score, horizon):
 
     score = max(0, min(100, score))
 
-    # SL / TP Dinamici su ATR
     atr = last['ATR']
     close = last['Close']
     mult = 1.0 if horizon == "1D" else (1.8 if horizon == "3D" else 2.6)
@@ -217,47 +205,53 @@ def calcola_modello(df, sentiment_score, horizon):
     return verdetto, score, colore, sl_val, sl_pct, tp_val, tp_pct, risk_reward, dettagli
 
 # ---------------------------------------------------------
-# INTERFACCIA UTENTE
+# INTERFACCIA UTENTE PULITA
 # ---------------------------------------------------------
-st.markdown("<h1>Terminal & Predictive Engine</h1>", unsafe_allow_html=True)
+header_col1, header_col2 = st.columns([3, 1])
+with header_col1:
+    st.markdown("<h1>Market Terminal</h1>", unsafe_allow_html=True)
+with header_col2:
+    update_btn = st.button("🔄 Aggiorna Dati")
+
 st.write("")
 
+# ControlliTicker e Orizzonte
 c1, c2 = st.columns([2, 1])
 with c1:
-    ticker = st.text_input("Ticker:", value="AAPL").upper().strip()
+    st.session_state.ticker_input = st.text_input("Ticker:", value=st.session_state.ticker_input).upper().strip()
 with c2:
-    horizon = st.selectbox("Orizzonte:", ["1D", "3D", "7D"], index=0)
+    st.session_state.horizon_input = st.selectbox("Orizzonte:", ["1D", "3D", "7D"], index=["1D", "3D", "7D"].index(st.session_state.horizon_input))
+
+ticker = st.session_state.ticker_input
+horizon = st.session_state.horizon_input
+
+if update_btn:
+    st.cache_data.clear()
 
 if ticker:
-    with st.spinner("Analisi in corso..."):
-        try:
-            df = yf.download(ticker, period="1y", interval="1d")
-            if df.empty:
-                st.error("Ticker non trovato.")
-                st.stop()
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
-
-            df = calcola_indicatori(df)
-            avg_sentiment, articoli = estrai_news_e_sentiment(ticker)
-            verdetto, score, colore, sl_val, sl_pct, tp_val, tp_pct, risk_reward, dettagli = calcola_modello(df, avg_sentiment, horizon)
-            last_price = df['Close'].iloc[-1]
-            change_pct = ((df['Close'].iloc[-1] - df['Close'].iloc[-2]) / df['Close'].iloc[-2]) * 100
-        except Exception as e:
-            st.error(f"Errore: {e}")
+    with st.spinner("Elaborazione dati in corso..."):
+        df = scarica_dati(ticker)
+        if df is None or df.empty:
+            st.error("Nessun dato trovato per il ticker inserito.")
             st.stop()
+        
+        df = calcola_indicatori(df)
+        avg_sentiment, articoli = estrai_news_e_sentiment(ticker)
+        verdetto, score, colore, sl_val, sl_pct, tp_val, tp_pct, risk_reward, dettagli = calcola_modello(df, avg_sentiment, horizon)
+        last_price = df['Close'].iloc[-1]
+        change_pct = ((df['Close'].iloc[-1] - df['Close'].iloc[-2]) / df['Close'].iloc[-2]) * 100
 
     # SCHEDA VERDETTO
     st.markdown(f"""
         <div class="metric-card" style="border-left: 5px solid {colore};">
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div>
-                    <span class="metric-label">Verdetto ({horizon})</span>
+                    <span class="metric-label">Verdetto Modello ({horizon})</span>
                     <h3 style="margin: 0; color: {colore} !important;">{verdetto}</h3>
                 </div>
                 <div style="text-align: right;">
-                    <span class="metric-label">Score</span>
-                    <div style="font-size: 20px; font-weight: bold; color: #f3f4f6;">{score}/100</div>
+                    <span class="metric-label">Score Confidenza</span>
+                    <div style="font-size: 18px; font-weight: bold; color: #f3f4f6;">{score}/100</div>
                 </div>
             </div>
         </div>
@@ -274,18 +268,18 @@ if ticker:
     with k4:
         st.markdown(f"""<div class="metric-card"><span class="metric-label">R/R Ratio</span><div class="metric-value" style="color:#38bdf8;">1 : {risk_reward:.1f}</div><span style="color:#9ca3af; font-size:11px;">Rischio/Beneficio</span></div>""", unsafe_allow_html=True)
 
-    # GRAFICO INTERATTIVO CON ZOOM LIBERO (MOBILE FRIENDLY)
+    # GRAFICO INTEGRATO E STABILE
     st.write("")
     st.subheader("Grafico & Indicatori")
     
     ind_options = st.multiselect(
-        "Seleziona Indicatori:",
-        ["SMA20", "SMA50", "EMA20", "Bande di Bollinger", "RSI", "MACD", "Stocastico"],
+        "Filtra Indicatori:",
+        ["SMA20", "SMA50", "EMA20", "Bande di Bollinger", "RSI", "MACD"],
         default=["SMA20", "Bande di Bollinger", "RSI"]
     )
 
-    num_plots = 1 + ("RSI" in ind_options) + ("MACD" in ind_options) + ("Stocastico" in ind_options)
-    row_heights = [0.52] + [0.16] * (num_plots - 1)
+    num_plots = 1 + ("RSI" in ind_options) + ("MACD" in ind_options)
+    row_heights = [0.6] + [0.2] * (num_plots - 1)
     
     fig = make_subplots(rows=num_plots, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=row_heights)
 
@@ -315,26 +309,19 @@ if ticker:
         fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], line=dict(color='#f97316', width=1.2), name='Signal'), row=curr_row, col=1)
         curr_row += 1
 
-    if "Stocastico" in ind_options:
-        fig.add_trace(go.Scatter(x=df.index, y=df['Stoch_K'], line=dict(color='#38bdf8', width=1.2), name='%K'), row=curr_row, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['Stoch_D'], line=dict(color='#f97316', width=1.2), name='%D'), row=curr_row, col=1)
-        curr_row += 1
-
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="#0b0f19",
         plot_bgcolor="#111827",
         margin=dict(l=5, r=5, t=5, b=5),
-        height=480,
+        height=450,
         xaxis_rangeslider_visible=False,
-        showlegend=False,
-        dragmode="zoom"
+        showlegend=False
     )
     
-    # Abilita lo zoom fluido e configurazione mobile
     st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True, 'displayModeBar': False})
 
-    # NOTIZIE RECENTI (ULTIMI 7 GIORNI)
+    # NOTIZIE RECENTI
     st.write("")
     st.subheader("Notizie & Sentiment Web")
     if articoli:
@@ -342,8 +329,8 @@ if ticker:
             sc_col = "#22c55e" if art['score'] > 0 else ("#ef4444" if art['score'] < 0 else "#9ca3af")
             st.markdown(f"""
                 <div class="metric-card">
-                    <a href="{art['link']}" target="_blank" style="color:#38bdf8; font-weight:500; font-size:13px; text-decoration:none;">{art['title']}</a>
-                    <div style="display:flex; justify-content:space-between; margin-top:4px; font-size:10px; color:#9ca3af;">
+                    <a href="{art['link']}" target="_blank" style="color:#38bdf8; font-weight:500; font-size:12px; text-decoration:none;">{art['title']}</a>
+                    <div style="display:flex; justify-content:space-between; margin-top:3px; font-size:10px; color:#9ca3af;">
                         <span>{art['publisher']}</span>
                         <span style="color:{sc_col}; font-weight:bold;">Sentiment: {art['score']:+.2f}</span>
                     </div>
@@ -355,9 +342,9 @@ if ticker:
     # GUIDA SPOSTATA RIGOROSAMENTE IN FONDO
     st.write("")
     with st.expander("📖 Guida ai Calcoli e Logica del Modello"):
-        st.write("Il punteggio **Score (0-100)** analizza la confluenza di molteplici indicatori:")
+        st.write("Il punteggio **Score (0-100)** valuta la confluenza dei seguenti fattori tecnici e di sentiment:")
         st.table(pd.DataFrame(dettagli))
         st.write("""
-        * **Rischio/Rendimento (R/R):** Indica il rapporto tra il potenziale guadagno e la perdita stimata in base alla volatilità (ATR). Un valore superiore a 1.5 è considerato ottimale per il trading.
-        * **Orizzonte (1D, 3D, 7D):** Ridimensiona l'ampiezza dell'ATR per adattare i target operativi al time-frame prescelto.
+        * **Rischio/Rendimento (R/R):** Rapporto tra target di profitto e stop loss basato sull'ATR (volatilità).
+        * **Orizzonte (1D, 3D, 7D):** Modula l'ampiezza dei livelli di rischio sul time-frame scelto.
         """)
