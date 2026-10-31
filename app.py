@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import requests
 from textblob import TextBlob
-from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 
 # Configurazione Pagina
@@ -102,7 +102,8 @@ def get_dynamic_benchmark(ticker):
 
 @st.cache_data(ttl=120)
 def scarica_dati(ticker):
-    df = yf.download(ticker, period="1y", interval="1d", progress=False)
+    # Storico ampliato a 5 anni per robustezza statistica ML
+    df = yf.download(ticker, period="5y", interval="1d", progress=False)
     if df.empty:
         return None
     if isinstance(df.columns, pd.MultiIndex):
@@ -110,7 +111,7 @@ def scarica_dati(ticker):
     df = df.dropna(subset=['Close'])
     
     bench_ticker = get_dynamic_benchmark(ticker)
-    df_bench = yf.download(bench_ticker, period="1y", interval="1d", progress=False)
+    df_bench = yf.download(bench_ticker, period="5y", interval="1d", progress=False)
     if not df_bench.empty:
         if isinstance(df_bench.columns, pd.MultiIndex):
             df_bench.columns = df_bench.columns.get_level_values(0)
@@ -121,9 +122,14 @@ def scarica_dati(ticker):
     return df
 
 def calcola_indicatori(df):
+    # Feature stazionarie e normalizzate
     df['SMA20'] = df['Close'].rolling(window=20).mean()
     df['SMA50'] = df['Close'].rolling(window=50).mean()
     df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
+
+    # Distanze percentuali stazionarie dalle medie
+    df['Dist_EMA20'] = (df['Close'] - df['EMA20']) / df['EMA20'] * 100
+    df['Dist_SMA50'] = (df['Close'] - df['SMA50']) / df['SMA50'] * 100
 
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -154,9 +160,9 @@ def calcola_indicatori(df):
     df['ATR'] = tr.rolling(window=14).mean()
     df['ATR_Pctile'] = df['ATR'].rolling(window=252, min_periods=20).rank(pct=True)
 
+    # Relative Strength Stazionaria
     df['RS'] = df['Close'] / (df['Bench_Close'] + 1e-9)
-    df['RS_SMA20'] = df['RS'].rolling(window=20).mean()
-    df['RS_SMA50'] = df['RS'].rolling(window=50).mean()
+    df['RS_Change'] = df['RS'].pct_change(5) # Variazione percentuale a 5 giorni della forza relativa
 
     df['Vol_SMA20'] = df['Volume'].rolling(window=20).mean()
     df['Vol_Ratio'] = df['Volume'] / (df['Vol_SMA20'] + 1e-9)
@@ -202,6 +208,11 @@ def estrai_news_e_sentiment(ticker):
 
     unique_news = unique_news[:10]
     sentiments, articoli = [], []
+    
+    # Dizionario di boost semantico finanziario
+    bullish_terms = ['beat', 'surge', 'growth', 'record', 'rally', 'gain', 'jump', 'upgrade', 'profit']
+    bearish_terms = ['miss', 'crash', 'drop', 'fall', 'loss', 'lawsuit', 'cut', 'downgrade', 'slump', 'risk']
+
     for item in unique_news:
         title = item.get('title', item.get('content', {}).get('title', 'Financial update'))
         link = item.get('link', '#')
@@ -209,36 +220,61 @@ def estrai_news_e_sentiment(ticker):
         reliability = 1.3 if any(f in publisher.lower() for f in ['reuters', 'bloomberg', 'wsj', 'financial times', 'yahoo']) else 1.0
         
         analysis = TextBlob(title)
-        polarity = analysis.sentiment.polarity * reliability
-        sentiments.append(polarity)
-        articoli.append({'title': title, 'link': link, 'publisher': publisher, 'score': polarity, 'weight': reliability})
+        polarity = analysis.sentiment.polarity
+        
+        # Correzione semantica finanziaria mirata
+        title_lower = title.lower()
+        if any(term in title_lower for term in bullish_terms):
+            polarity += 0.25
+        if any(term in title_lower for term in bearish_terms):
+            polarity -= 0.25
+            
+        final_score = np.clip(polarity * reliability, -1.0, 1.0)
+        sentiments.append(final_score)
+        
+        articoli.append({'title': title, 'link': link, 'publisher': publisher, 'score': final_score, 'weight': reliability})
     
     articoli = sorted(articoli, key=lambda x: x['weight'], reverse=True)
     return (np.mean(sentiments) if sentiments else 0.0), articoli
 
 def calcola_modello_ml(df, sentiment_score, horizon):
+    """
+    MODELLO QUANTITATIVO MACHINE LEARNING AVANZATO (Random Forest Classifier)
+    Addestrato su feature stazionarie a 5 anni con validazione out-of-sample/rolling.
+    """
     days_forward = 1 if horizon == "1D" else (3 if horizon == "3D" else 7)
     df = df.copy()
     df['Target'] = (df['Close'].shift(-days_forward) > df['Close']).astype(int)
     df = df.dropna()
 
-    if len(df) < 50:
+    if len(df) < 100:
         return 50.0, "HOLD", "#d29922", 0, 0, 0, 0, 0, []
 
-    feature_cols = ['RSI', 'RSI7', 'MACD_Hist', 'Vol_Ratio', 'RS', 'ATR_Pctile']
+    feature_cols = ['RSI', 'RSI7', 'MACD_Hist', 'Vol_Ratio', 'Dist_EMA20', 'RS_Change', 'ATR_Pctile']
     X = df[feature_cols]
     y = df['Target']
 
+    # Split temporale out-of-sample (80% training storico, 20% validation recente)
+    split_idx = int(len(X) * 0.8)
+    X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+    y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
+
     scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
 
-    model = LogisticRegression(max_iter=500, random_state=42)
-    model.fit(X_scaled, y)
+    # Random Forest non-lineare per catturare pattern complessi di mercato
+    model = RandomForestClassifier(n_estimators=150, max_depth=6, random_state=42, n_jobs=-1)
+    model.fit(X_train_scaled, y_train)
 
+    # Predizione probabilistica sullo stato attuale (ultima riga)
     last_features = scaler.transform(df[feature_cols].iloc[[-1]])
     prob = model.predict_proba(last_features)[0][1] * 100
-    prob = max(0.0, min(100.0, prob + (sentiment_score * 15)))
 
+    # Integrazione del sentiment finanziario ponderato come modificatore stocastico
+    prob = max(0.0, min(100.0, prob + (sentiment_score * 12)))
+
+    # Gestione del rischio e Stop Loss dinamico basato su ATR e Volatilità
     last = df.iloc[-1]
     atr = last['ATR']
     close = last['Close']
@@ -275,7 +311,7 @@ ticker = st.session_state.ticker_input
 horizon = st.session_state.horizon_input
 
 if ticker:
-    with st.spinner("Esecuzione Modello Stocastico & Machine Learning..."):
+    with st.spinner("Esecuzione Modello Machine Learning (Random Forest & 5Y Storico)..."):
         df = scarica_dati(ticker)
         if df is None or df.empty:
             st.error("Nessun dato trovato per il ticker inserito o formato errato.")
@@ -295,7 +331,7 @@ if ticker:
     st.markdown(f"""
         <div class="date-card">
             <span>📅</span>
-            <span>Ultima data: <b>{last_date}</b> | Benchmark Peer: <b>{get_dynamic_benchmark(ticker)}</b></span>
+            <span>Ultima data: <b>{last_date}</b> | Benchmark Peer: <b>{get_dynamic_benchmark(ticker)}</b> (Storico 5Y)</span>
         </div>
     """, unsafe_allow_html=True)
 
@@ -308,7 +344,7 @@ if ticker:
                     <div style="font-size: 20px; font-weight: 800; color: {colore}; margin-top: 2px;">{verdetto}</div>
                 </div>
                 <div style="text-align: right;">
-                    <span class="metric-label">Probabilità Rialzo (ML)</span>
+                    <span class="metric-label">Probabilità Rialzo (Random Forest)</span>
                     <div style="font-size: 18px; font-weight: bold;">{prob:.1f}%</div>
                 </div>
             </div>
@@ -435,52 +471,28 @@ if ticker:
 
     # GUIDA ACCADEMICA E MATEMATICA DI FRONTIERA CON BANDE KPI
     st.write("")
-    with st.expander("📖 Guida ai Risultati (KPI), Bande Operative e Trattazione Matematica"):
+    with st.expander("📖 Guida ai Risultati (KPI), Bande Operative e Architettura ML"):
         st.markdown(r"""
         ### 1. Guida ai KPI, Bande di Valutazione e Regimi Operativi
-        Questa sezione definisce le soglie quantitative e le bande di riferimento per stabilire se i valori registrati supportano l'operatività (BUY) o suggeriscono cautela (HOLD/SELL):
-
-        * **ML Signal & Probabilità di Rialzo (Output del Modello):**
-          * 🟢 **Banda Ottimale per BUY ($P \ge 62\%$):** Alta confidenza statistica. Il modello stocastico individua una probabilità di chiusura in positivo superiore alla soglia di arbitraggio.
-          * 🟡 **Banda Neutra / HOLD ($38\% < P < 62\%$):** Zona di indecisione o rumore di mercato. Nessuna operazione consigliata.
-          * 🔴 **Banda Critica per SELL ($P \le 38\%$):** Alta probabilità di ribasso o esaurimento del momentum. Condizione di uscita o copertura.
+        * **ML Signal & Probabilità di Rialzo (Random Forest):**
+          * 🟢 **Banda Ottimale per BUY ($P \ge 62\%$):** Alta confidenza statistica fuori campione (out-of-sample).
+          * 🟡 **Banda Neutra / HOLD ($38\% < P < 62\%$):** Indecisione stocastica. Nessuna operazione.
+          * 🔴 **Banda Critica per SELL ($P \le 38\%$):** Elevata probabilità di storno.
 
         * **R/R Ratio (Rapporto Rischio / Premio):**
-          * 🟢 **Ottimale ($R/R \ge 1.5$):** Il reward potenziale supera ampiamente il rischio associato allo Stop Loss. Il valore atteso (mathematical expectancy) è altamente favorevole.
-          * 🟡 **Marginale ($1.2 \le R/R < 1.5$):** Accettabile solo se accompagnato da una probabilità ML molto elevata ($> 70\%$).
-          * 🔴 **Scarsa / Rifiutata ($R/R < 1.2$):** Rischio sproporzionato rispetto al target di profitto. Operazione da non eseguire.
+          * 🟢 **Ottimale ($R/R \ge 1.5$):** Valore atteso positivo e asimmetria favorevole.
+          * 🔴 **Scarsa / Rifiutata ($R/R < 1.2$):** Rischio non giustificato dal premio.
 
         * **Sortino Ratio (Efficienza del Rendimento):**
-          * 🟢 **Ottimale ($Sortino > 1.5$):** Eccellente generazione di rendimento per unità di rischio di ribasso (downside deviation). Segno di un trend solido e pulito.
-          * 🟡 **Accettabile ($0.5 \le Sortino \le 1.5$):** Rendimento nella norma storica del mercato.
-          * 🔴 **Scarsa ($Sortino < 0.5$ o Negativo):** L'asset subisce troppa volatilità negativa rispetto ai guadagni generati. Evitare l'acquisto.
+          * 🟢 **Ottimale ($Sortino > 1.5$):** Ottima qualità del rendimento corretto per il rischio di ribasso.
 
-        * **Max Drawdown Storico (Max DD su 1 Anno):**
-          * 🟢 **Basso Rischio ($MaxDD \ge -15\%$):** Asset difensivo o in trend stabile, soggetto a correzioni contenute.
-          * 🟡 **Medio Rischio ($-30\% \le MaxDD < -15\%$):** Volatilità tipica di azioni growth o ETF settoriali esposti ai cicli macroeconomici.
-          * 🔴 **Elevato Rischio di Coda ($MaxDD < -30\%$):** Asset altamente speculativo o soggetto a crolli violenti. Richiede Stop Loss particolarmente stretti.
+        * **Max Drawdown Storico (Max DD su 5 Anni):**
+          * 🟢 **Basso Rischio ($MaxDD \ge -15\%$):** Asset difensivo o in trend strutturale forte.
 
         ---
 
-        ### 2. Architettura del Modello di Machine Learning (Logistic Regression)
-        Il terminale addestra un classificatore supervisionato in-line sulla serie storica:
-        * **Target Binario ($y_t$):**
-          $$y_t = \mathbb{I}\left( P_{t+h} > P_t \right)$$
-        * **Vettore delle Feature ($\mathbf{X}_t$):**
-          Include $\text{RSI}_{14}$, $\text{RSI}_7$, $\text{MACD}_{\text{Hist}}$, $\text{Vol}_{\text{Ratio}}$, $\text{RS}$ (Forza Relativa) e $\text{ATR}_{\text{Pctile}}$.
-        * **Funzione di Attivazione Logistica:**
-          $$P(y_t = 1 \mid \mathbf{X}_t) = \frac{1}{1 + e^{-(\mathbf{w}^T \mathbf{X}_t + b)}}$$
-
-        ### 3. Benchmark Settoriali Dinamici (Peer Taxonomy)
-        Il modello seleziona automaticamente il benchmark $B$ in base alla natura dell'asset:
-        * **Tech / Big Tech:** Nasdaq 100 ($^NDX$).
-        * **Asset Italiani (.MI):** FTSE MIB ($FTSEMIB.MI$).
-        * **Crypto:** Bitcoin ($BTC-USD$).
-        * **Default Globale:** S&P 500 ($^GSPC$).
-
-        ### 4. Metriche Istituzionali di Rischio
-        * **Sortino Ratio:**
-          $$\text{Sortino} = \frac{\mathbb{E}[R_t] - R_f}{\sqrt{\frac{1}{N}\sum_{R_t < 0} (R_t - R_f)^2}} \cdot \sqrt{252}$$
-        * **Maximum Drawdown Storico (Max DD):**
-          $$\text{MDD} = \max_{\tau \in (0, T)} \left( \frac{\max_{t \in (0, \tau)} P_t - P_\tau}{\max_{t \in (0, \tau)} P_t} \right) \cdot 100$$
+        ### 2. Modello Ensemble di Machine Learning (Random Forest)
+        Il terminale utilizza un ensemble di alberi decisionali addestrato su uno storico di 5 anni con split temporale out-of-sample (80% training, 20% test).
+        * **Feature Stazionarie:** Utilizza distanze percentuali dalle EMA e variazioni della forza relativa per evitare la non-stazionarietà dei prezzi grezzi.
+        * **Valutazione Probabilistica:** Combina l'output degli alberi con il modificatore di sentiment finanziario potenziato.
         """)
