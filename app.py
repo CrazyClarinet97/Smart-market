@@ -95,6 +95,18 @@ def scarica_dati(ticker):
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     df = df.dropna(subset=['Close'])
+    
+    # Download Benchmark per Idea 1 (Forza Relativa)
+    bench_ticker = "FTSEMIB.MI" if ticker.endswith(".MI") else "^GSPC"
+    df_bench = yf.download(bench_ticker, period="1y", interval="1d", progress=False)
+    if not df_bench.empty:
+        if isinstance(df_bench.columns, pd.MultiIndex):
+            df_bench.columns = df_bench.columns.get_level_values(0)
+        # Allineamento date
+        df['Bench_Close'] = df_bench['Close'].reindex(df.index, method='ffill')
+    else:
+        df['Bench_Close'] = df['Close'] # Fallback neutro
+        
     return df
 
 def calcola_indicatori(df):
@@ -102,6 +114,7 @@ def calcola_indicatori(df):
     df['SMA50'] = df['Close'].rolling(window=50).mean()
     df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
 
+    # RSI 14 e RSI 7
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -113,40 +126,61 @@ def calcola_indicatori(df):
     rs7 = gain7 / (loss7 + 1e-9)
     df['RSI7'] = 100 - (100 / (1 + rs7))
 
+    # MACD
     ema12 = df['Close'].ewm(span=12, adjust=False).mean()
     ema26 = df['Close'].ewm(span=26, adjust=False).mean()
     df['MACD'] = ema12 - ema26
     df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
     df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
 
+    # Bande di Bollinger
     df['BB_Middle'] = df['SMA20']
     std = df['Close'].rolling(window=20).std()
     df['BB_Upper'] = df['BB_Middle'] + (std * 2)
     df['BB_Lower'] = df['BB_Middle'] - (std * 2)
 
+    # ATR (Average True Range)
     tr1 = df['High'] - df['Low']
     tr2 = abs(df['High'] - df['Close'].shift())
     tr3 = abs(df['Low'] - df['Close'].shift())
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     df['ATR'] = tr.rolling(window=14).mean()
 
+    # Idea 3: Percentile ATR (Regime di Volatilità a 252 periodi)
+    df['ATR_Pctile'] = df['ATR'].rolling(window=252, min_periods=20).rank(pct=True)
+
+    # Idea 1: Relative Strength Line (Asset / Benchmark) e SMA di RS
+    df['RS'] = df['Close'] / (df['Bench_Close'] + 1e-9)
+    df['RS_SMA20'] = df['RS'].rolling(window=20).mean()
+    df['RS_SMA50'] = df['RS'].rolling(window=50).mean()
+
+    # Volume Ratio
     df['Vol_SMA20'] = df['Volume'].rolling(window=20).mean()
     df['Vol_Ratio'] = df['Volume'] / (df['Vol_SMA20'] + 1e-9)
     return df
 
 def estrai_news_e_sentiment(ticker):
     try:
-        url = f"https://query2.finance.yahoo.com/v1/finance/search?q={ticker}"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers).json()
-        news_list = response.get('news', [])[:10]
-        
+        tk = yf.Ticker(ticker)
+        news_list = tk.news
+        if not news_list:
+            # Fallback su query base senza suffisso .MI se vuoto
+            base_ticker = ticker.split('.')[0]
+            url = f"https://query2.finance.yahoo.com/v1/finance/search?q={base_ticker}"
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            response = requests.get(url, headers=headers).json()
+            news_list = response.get('news', [])
+            
+        news_list = news_list[:10]
         sentiments, articoli = [], []
         for item in news_list:
-            title = item.get('title', '')
-            link = item.get('link', '#')
-            publisher = item.get('publisher', 'Fonte Web')
-            reliability = 1.2 if any(f in publisher.lower() for f in ['reuters', 'bloomberg', 'wsj', 'financial times', 'yahoo']) else 1.0
+            title = item.get('title', item.get('content', {}).get('title', ''))
+            link = item.get('link', item.get('content', {}).get('clickThroughUrl', {}).get('url', '#'))
+            publisher = item.get('publisher', item.get('content', {}).get('provider', {}).get('displayName', 'Fonte Web'))
+            if not title:
+                continue
+                
+            reliability = 1.3 if any(f in publisher.lower() for f in ['reuters', 'bloomberg', 'wsj', 'financial times', 'yahoo', 'ansa', 'il sole 24 ore']) else 1.0
             
             analysis = TextBlob(title)
             polarity = analysis.sentiment.polarity * reliability
@@ -162,54 +196,84 @@ def estrai_news_e_sentiment(ticker):
         return 0.0, []
 
 def calcola_modello_quant(df, sentiment_score, horizon):
+    """
+    MODELLO QUANTITATIVO AVANZATO CON IDEA 1 (FORZA RELATIVA) & IDEA 3 (REGIME VOLATILITÀ)
+    """
     last = df.iloc[-1]
     prev = df.iloc[-2]
     dettagli = []
-    score = 50.0
+    score = 50.0  # Base neutra
 
+    # 1. RSI Confluence (14 & 7)
     rsi14 = last['RSI']
     rsi7 = last['RSI7']
     if rsi14 < 32 and rsi7 < 30:
-        score += 18
-        dettagli.append({"Fattore": "RSI Confluence (14 & 7)", "Peso": "+18", "Stato": f"Ipervenduto profondo (RSI14: {rsi14:.1f}, RSI7: {rsi7:.1f})"})
+        score += 15
+        dettagli.append({"Fattore": "RSI Confluence (14 & 7)", "Peso": "+15", "Stato": f"Ipervenduto profondo (RSI14: {rsi14:.1f})"})
     elif rsi14 > 68 and rsi7 > 70:
-        score -= 18
-        dettagli.append({"Fattore": "RSI Confluence (14 & 7)", "Peso": "-18", "Stato": f"Ipercomprato critico (RSI14: {rsi14:.1f}, RSI7: {rsi7:.1f})"})
+        score -= 15
+        dettagli.append({"Fattore": "RSI Confluence (14 & 7)", "Peso": "-15", "Stato": f"Ipercomprato critico (RSI14: {rsi14:.1f})"})
     else:
-        score += 4
-        dettagli.append({"Fattore": "RSI (14)", "Peso": "+4", "Stato": f"Fascia di equilibrio ({rsi14:.1f})"})
+        score += 3
+        dettagli.append({"Fattore": "RSI (14)", "Peso": "+3", "Stato": f"Fascia di equilibrio ({rsi14:.1f})"})
 
+    # 2. Trend Strutturale (SMA50 & EMA20)
     if last['Close'] > last['SMA50'] and last['EMA20'] > last['SMA50']:
-        score += 18
-        dettagli.append({"Fattore": "Trend Strutturale (SMA50/EMA20)", "Peso": "+18", "Stato": "Uptrend confermato sopra le medie"})
+        score += 15
+        dettagli.append({"Fattore": "Trend Strutturale (SMA50/EMA20)", "Peso": "+15", "Stato": "Uptrend confermato sopra le medie"})
     elif last['Close'] < last['SMA50']:
-        score -= 18
-        dettagli.append({"Fattore": "Trend Strutturale (SMA50)", "Peso": "-18", "Stato": "Downtrend sotto la SMA50"})
+        score -= 15
+        dettagli.append({"Fattore": "Trend Strutturale (SMA50)", "Peso": "-15", "Stato": "Downtrend sotto la SMA50"})
 
+    # 3. IDEA 1: Forza Relativa vs Benchmark (Relative Strength Line)
+    rs_val = last['RS']
+    rs_sma20 = last['RS_SMA20']
+    rs_sma50 = last['RS_SMA50']
+    if rs_val > rs_sma20 and rs_sma20 > rs_sma50:
+        score += 12
+        dettagli.append({"Fattore": "Forza Relativa (Idea 1 vs Benchmark)", "Peso": "+12", "Stato": "Asset sovraperforma il mercato di riferimento"})
+    elif rs_val < rs_sma20:
+        score -= 12
+        dettagli.append({"Fattore": "Forza Relativa (Idea 1 vs Benchmark)", "Peso": "-12", "Stato": "Asset sottoperforma l'indice di mercato"})
+
+    # 4. IDEA 3: Filtro di Regime di Volatilità (ATR Percentile)
+    atr_pctile = last['ATR_Pctile']
+    if not np.isnan(atr_pctile):
+        if atr_pctile > 0.85:
+            score -= 12
+            dettagli.append({"Fattore": "Regime Volatilità ATR (Idea 3)", "Peso": "-12", "Stato": f"Alta instabilità / panico (Percentile {atr_pctile*100:.0f}%)"})
+        elif atr_pctile < 0.20:
+            score += 6
+            dettagli.append({"Fattore": "Regime Volatilità ATR (Idea 3)", "Peso": "+6", "Stato": f"Bassa volatilità / stabilità (Percentile {atr_pctile*100:.0f}%)"})
+
+    # 5. Order Flow (Volume Ratio)
     vol_ratio = last['Vol_Ratio']
     if vol_ratio > 1.3 and last['Close'] > prev['Close']:
-        score += 14
-        dettagli.append({"Fattore": "Order Flow (Volumi)", "Peso": "+14", "Stato": f"Pressione d'acquisto (Vol {vol_ratio:.1f}x)"})
-    elif vol_ratio > 1.3 and last['Close'] < prev['Close']:
-        score -= 14
-        dettagli.append({"Fattore": "Order Flow (Volumi)", "Peso": "-14", "Stato": f"Pressione di scarico (Vol {vol_ratio:.1f}x)"})
-
-    if last['MACD'] > last['MACD_Signal'] and last['MACD_Hist'] > prev['MACD_Hist']:
-        score += 12
-        dettagli.append({"Fattore": "MACD Momentum", "Peso": "+12", "Stato": "Crossover e istogramma espansivo"})
-    elif last['MACD'] < last['MACD_Signal']:
-        score -= 12
-        dettagli.append({"Fattore": "MACD Momentum", "Peso": "-12", "Stato": "Sotto la linea di segnale"})
-
-    if sentiment_score > 0.04:
         score += 10
-        dettagli.append({"Fattore": "Sentiment Web", "Peso": "+10", "Stato": f"Flusso notizie positivo (+{sentiment_score:.2f})"})
-    elif sentiment_score < -0.04:
+        dettagli.append({"Fattore": "Order Flow (Volumi)", "Peso": "+10", "Stato": f"Pressione d'acquisto (Vol {vol_ratio:.1f}x)"})
+    elif vol_ratio > 1.3 and last['Close'] < prev['Close']:
         score -= 10
-        dettagli.append({"Fattore": "Sentiment Web", "Peso": "-10", "Stato": f"Flusso notizie negativo ({sentiment_score:.2f})"})
+        dettagli.append({"Fattore": "Order Flow (Volumi)", "Peso": "-10", "Stato": f"Pressione di scarico (Vol {vol_ratio:.1f}x)"})
+
+    # 6. MACD Momentum
+    if last['MACD'] > last['MACD_Signal'] and last['MACD_Hist'] > prev['MACD_Hist']:
+        score += 8
+        dettagli.append({"Fattore": "MACD Momentum", "Peso": "+8", "Stato": "Crossover e istogramma espansivo"})
+    elif last['MACD'] < last['MACD_Signal']:
+        score -= 8
+        dettagli.append({"Fattore": "MACD Momentum", "Peso": "-8", "Stato": "Sotto la linea di segnale"})
+
+    # 7. Sentiment Ponderato
+    if sentiment_score > 0.04:
+        score += 8
+        dettagli.append({"Fattore": "Sentiment Web Ponderato", "Peso": "+8", "Stato": f"Flusso notizie positivo (+{sentiment_score:.2f})"})
+    elif sentiment_score < -0.04:
+        score -= 8
+        dettagli.append({"Fattore": "Sentiment Web Ponderato", "Peso": "-8", "Stato": f"Flusso notizie negativo ({sentiment_score:.2f})"})
 
     score = max(0.0, min(100.0, score))
 
+    # ATR e Orizzonte con compensazione dinamica per Idea 3 (Regime di volatilità)
     atr = last['ATR']
     close = last['Close']
     
@@ -219,6 +283,10 @@ def calcola_modello_quant(df, sentiment_score, horizon):
         atr_mult, sl_buf, tp_buf = 1.8, 1.2, 2.2
     else:
         atr_mult, sl_buf, tp_buf = 2.6, 1.3, 2.8
+
+    # Se siamo in regime di alta volatilità (Idea 3), allarghiamo lo stop loss per evitare falsi stop
+    if not np.isnan(atr_pctile) and atr_pctile > 0.85:
+        sl_buf *= 1.3
 
     sl_val = close - (atr * atr_mult * sl_buf)
     tp_val = close + (atr * atr_mult * tp_buf)
@@ -263,7 +331,7 @@ if ticker:
         last_price = df['Close'].iloc[-1]
         change_pct = ((df['Close'].iloc[-1] - df['Close'].iloc[-2]) / df['Close'].iloc[-2]) * 100
 
-    # BOX DATA (ACCORCIATO)
+    # BOX DATA
     st.markdown(f"""
         <div class="date-card">
             <span>📅</span>
@@ -405,34 +473,26 @@ if ticker:
     else:
         st.info("Nessuna notizia recente.")
 
-    # GUIDA MATEMATICA
+    # GUIDA MATEMATICA AGGIORNATA
     st.write("")
-    with st.expander("📖 Documentazione Matematica e Modello Quantitativo"):
+    with st.expander("📖 Documentazione Matematica e Modello Quantitativo (Aggiornato Idea 1 & 3)"):
         st.markdown("""
-        ### 1. Architettura del Modello Quantitativo (Multi-Factor Scoring)
-        Il terminale calcola uno **Score Globale** $S \in [0, 100]$ partendo da un'assunzione di neutralità pari a $50.0$. Ciascun indicatore applica una variazione discreta $\\Delta s_i$ in base allo stato stocastico e strutturale dell'asset:
+        ### 1. Architettura del Modello Quantitativo con Relative Strength e Regime di Volatilità
+        Il terminale calcola lo **Score Globale** $S \in [0, 100]$ partendo da $50.0$. Ora include:
         """)
         st.table(pd.DataFrame(dettagli))
         st.markdown("""
-        ### 2. Logica delle Fasce Operative e Criteri di Ingresso
-        Il modello mappa lo score finale $S$ in tre regimi operativi discreti:
-        * **Fascia BUY ($S \\ge 62.0$):** Confluenza statistica positiva. Trend strutturale rialzista e volumi in accumulazione.
-        * **Fascia HOLD ($38.0 < S < 62.0$):** Regime di congestione o divergenza tra indicatori. Nessuna operazione raccomandata.
-        * **Fascia SELL ($S \\le 38.0$):** Confluenza ribassista o ipercomprato critico con volumi di distribuzione.
-
-        ### 3. Formule di Volatilità e Gestione del Rischio (ATR & Horizon Scaling)
-        * **Calcolo della True Range (TR):**
-          $$\\text{TR}_t = \\max\\left( \\text{High}_t - \\text{Low}_t, \\; |\\text{High}_t - \\text{Close}_{t-1}|, \\; |\\text{Low}_t - \\text{Close}_{t-1}| \\right)$$
+        ### 2. Dettaglio Matematico delle Nuove Implementazioni
+        * **Idea 1 - Forza Relativa (Relative Strength):**
+          Calcola il rapporto tra il prezzo dell'asset e il benchmark di riferimento ($RS = \\frac{P_{\\text{asset}}}{P_{\\text{bench}}}$, dove il benchmark è il *FTSEMIB.MI* per i ticker italiani o l'*S&P 500* per gli esteri). Se la media mobile a 20 periodi di RS è superiore alla 50 periodi, l'asset dimostra una forza superiore al mercato, aggiungendo punti al quant score.
         
-        * **Calcolo dell'ATR:**
-          $$\\text{ATR}_{14} = \\frac{1}{14} \\sum_{i=0}^{13} \\text{TR}_{t-i}$$
+        * **Idea 3 - Filtro di Regime di Volatilità (ATR Percentile):**
+          Calcola il rango percentuale dell'ATR odierno rispetto agli ultimi 252 giorni di negoziazione:
+          $$\\text{Rank}_t = \\frac{1}{252} \\sum_{i=0}^{251} \\mathbb{I}(\\text{ATR}_{t-i} \\le \\text{ATR}_t)$$
+          Se $\\text{Rank}_t > 0.85$ (regime di alta volatilità / panico), il modello penalizza lo score e dilata automaticamente il buffer di stop loss per evitare falsi stop guidati dal rumore di mercato.
 
-        * **Matrice dei Coefficienti Temporali ($k_h$):**
-          * $H = 1\\text{D} \\implies k_{1\text{D}} = 1.0$
-          * $H = 3\\text{D} \\implies k_{3\text{D}} = 1.8$
-          * $H = 7\\text{D} \\implies k_{7\text{D}} = 2.6$
-
-        * **Livelli Operativi Finali:**
-          $$\\text{SL} = \\text{Close}_t - (\\text{ATR}_{14} \\cdot k_h \\cdot 1.2)$$
-          $$\\text{TP} = \\text{Close}_t + (\\text{ATR}_{14} \\cdot k_h \\cdot 2.2)$$
+        ### 3. Logica delle Fasce Operative
+        * **BUY ($S \\ge 62.0$):** Confluenza positiva di trend, volumi, forza relativa e sentiment.
+        * **HOLD ($38.0 < S < 62.0$):** Indecisione o divergenza tra indicatori.
+        * **SELL ($S \\le 38.0$):** Pressione ribassista o volatilità critica in distribuzione.
         """)
