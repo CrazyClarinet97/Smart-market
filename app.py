@@ -96,7 +96,6 @@ def scarica_dati(ticker):
         df.columns = df.columns.get_level_values(0)
     df = df.dropna(subset=['Close'])
     
-    # Download Benchmark per Idea 1 (Forza Relativa)
     bench_ticker = "FTSEMIB.MI" if ticker.endswith(".MI") else "^GSPC"
     df_bench = yf.download(bench_ticker, period="1y", interval="1d", progress=False)
     if not df_bench.empty:
@@ -141,10 +140,8 @@ def calcola_indicatori(df):
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     df['ATR'] = tr.rolling(window=14).mean()
 
-    # Idea 3: Percentile ATR (Regime di Volatilità a 252 periodi)
     df['ATR_Pctile'] = df['ATR'].rolling(window=252, min_periods=20).rank(pct=True)
 
-    # Idea 1: Relative Strength Line (Asset / Benchmark)
     df['RS'] = df['Close'] / (df['Bench_Close'] + 1e-9)
     df['RS_SMA20'] = df['RS'].rolling(window=20).mean()
     df['RS_SMA50'] = df['RS'].rolling(window=50).mean()
@@ -154,14 +151,8 @@ def calcola_indicatori(df):
     return df
 
 def estrai_news_e_sentiment(ticker):
-    """
-    MOTORE DI RICERCA NOTIZIE MULTI-LIVELLO A CASCATA
-    Garantisce sempre un set robusto di notizie combinando ticker, nome base e settore.
-    """
     news_list = []
     queries = [ticker]
-    
-    # Aggiunge query di fallback intelligenti se è un ETF o codice locale
     clean_tk = ticker.split('.')[0]
     if clean_tk != ticker:
         queries.append(clean_tk)
@@ -174,7 +165,6 @@ def estrai_news_e_sentiment(ticker):
         queries.append("Stock market news")
 
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-    
     for q in queries:
         try:
             url = f"https://query2.finance.yahoo.com/v1/finance/search?q={q}"
@@ -185,7 +175,6 @@ def estrai_news_e_sentiment(ticker):
         except:
             pass
 
-    # Deduplicazione basata sul titolo
     seen_titles = set()
     unique_news = []
     for item in news_list:
@@ -194,7 +183,6 @@ def estrai_news_e_sentiment(ticker):
             seen_titles.add(title)
             unique_news.append(item)
 
-    # Se ancora vuoto, usa un fallback generico di mercato finanziario
     if not unique_news:
         unique_news = [
             {'title': f"Market update and technical outlook for {ticker}", 'link': '#', 'publisher': 'Global Market Wire'},
@@ -204,15 +192,12 @@ def estrai_news_e_sentiment(ticker):
 
     unique_news = unique_news[:10]
     sentiments, articoli = [], []
-    
     for item in unique_news:
         title = item.get('title', item.get('content', {}).get('title', 'Financial update'))
         link = item.get('link', item.get('content', {}).get('clickThroughUrl', {}).get('url', '#'))
         publisher = item.get('publisher', item.get('content', {}).get('provider', {}).get('displayName', 'Financial News'))
         
-        # Ponderazione affidabilità fonti autorevoli
         reliability = 1.3 if any(f in publisher.lower() for f in ['reuters', 'bloomberg', 'wsj', 'financial times', 'yahoo', 'ansa', 'sole 24 ore']) else 1.0
-        
         analysis = TextBlob(title)
         polarity = analysis.sentiment.polarity * reliability
         sentiments.append(polarity)
@@ -250,7 +235,6 @@ def calcola_modello_quant(df, sentiment_score, horizon):
         score -= 15
         dettagli.append({"Fattore": "Trend Strutturale (SMA50)", "Peso": "-15", "Stato": "Downtrend sotto la SMA50"})
 
-    # IDEA 1: Forza Relativa vs Benchmark
     rs_val = last['RS']
     rs_sma20 = last['RS_SMA20']
     rs_sma50 = last['RS_SMA50']
@@ -261,7 +245,6 @@ def calcola_modello_quant(df, sentiment_score, horizon):
         score -= 12
         dettagli.append({"Fattore": "Forza Relativa (Idea 1 vs Benchmark)", "Peso": "-12", "Stato": "Asset sottoperforma l'indice di mercato"})
 
-    # IDEA 3: Filtro di Regime di Volatilità
     atr_pctile = last['ATR_Pctile']
     if not np.isnan(atr_pctile):
         if atr_pctile > 0.85:
@@ -493,26 +476,85 @@ if ticker:
     else:
         st.info("Nessuna notizia recente.")
 
-    # GUIDA MATEMATICA
+    # =========================================================
+    # GUIDA MATEMATICA E FORMALE INTEGRALE (RIGOROSAMENTE IN FONDO)
+    # =========================================================
     st.write("")
-    with st.expander("📖 Documentazione Matematica e Modello Quantitativo (Aggiornato Idea 1 & 3)"):
+    with st.expander("📖 Trattazione Matematica e Modello Quantitativo Integrale"):
         st.markdown("""
-        ### 1. Architettura del Modello Quantitativo con Relative Strength e Regime di Volatilità
-        Il terminale calcola lo **Score Globale** $S \in [0, 100]$ partendo da $50.0$. Ora include:
-        """)
-        st.table(pd.DataFrame(dettagli))
-        st.markdown("""
-        ### 2. Dettaglio Matematico delle Nuove Implementazioni
-        * **Idea 1 - Forza Relativa (Relative Strength):**
-          Calcola il rapporto tra il prezzo dell'asset e il benchmark di riferimento ($RS = \\frac{P_{\\text{asset}}}{P_{\\text{bench}}}$, dove il benchmark è il *FTSEMIB.MI* per i ticker italiani o l'*S&P 500* per gli esteri). Se la media mobile a 20 periodi di RS è superiore alla 50 periodi, l'asset dimostra una forza superiore al mercato, aggiungendo punti al quant score.
-        
-        * **Idea 3 - Filtro di Regime di Volatilità (ATR Percentile):**
-          Calcola il rango percentuale dell'ATR odierno rispetto agli ultimi 252 giorni di negoziazione:
-          $$\\text{Rank}_t = \\frac{1}{252} \\sum_{i=0}^{251} \\mathbb{I}(\\text{ATR}_{t-i} \\le \\text{ATR}_t)$$
-          Se $\\text{Rank}_t > 0.85$ (regime di alta volatilità / panico), il modello penalizza lo score e dilata automaticamente il buffer di stop loss per evitare falsi stop guidati dal rumore di mercato.
+        ### 1. Ingestion dei Dati e Preprocessing Temporale
+        Il sistema acquisisce serie storiche giornaliere di 1 anno ($\\text{period} = 1\\text{y}$) tramite `yfinance`. Per ogni asset target $T$, viene scaricato in parallelo il rispettivo benchmark di riferimento $B$ ($FTSEMIB.MI$ per i ticker italiani terminanti in `.MI`, $^GSPC$ per i mercati esteri).
+        * Viene estratto il prezzo di chiusura $P_t$, High $H_t$, Low $L_t$ e Volume $V_t$.
+        * Viene eseguito il *Forward Fill* per allineare l'indice temporale delle date di negoziazione e la rimozione di eventuali righe con valori nulli (`dropna`).
 
-        ### 3. Logica delle Fasce Operative
-        * **BUY ($S \\ge 62.0$):** Confluenza positiva di trend, volumi, forza relativa e sentiment.
-        * **HOLD ($38.0 < S < 62.0$):** Indecisione o divergenza tra indicatori.
-        * **SELL ($S \\le 38.0$):** Pressione ribassista o volatilità critica in distribuzione.
+        ### 2. Formulazione Analitica degli Indicatori Tecnici
+        * **Medie Mobili (SMA e EMA):**
+          $$\\text{SMA}_N(t) = \\frac{1}{N} \\sum_{i=0}^{N-1} P_{t-i}$$
+          $$\\text{EMA}_N(t) = P_t \\cdot \\left(\\frac{2}{N+1}\\right) + \\text{EMA}_N(t-1) \\cdot \\left(1 - \\frac{2}{N+1}\\right)$$
+          *Implementate: $\\text{SMA}_{20}, \\text{SMA}_{50}, \\text{EMA}_{20}$.*
+
+        * **Relative Strength Index (RSI a 14 e 7 periodi):**
+          Calcolato tramite la media esponenziale o mobile dei guadagni ($U$) e delle perdite ($D$) assolute:
+          $$U_t = \\max(P_t - P_{t-1}, 0), \\quad D_t = \\max(P_{t-1} - P_t, 0)$$
+          $$\\text{RS} = \\frac{\\text{SMA}_n(U)}{\\text{SMA}_n(D)}, \\quad \\text{RSI}_n = 100 - \\frac{100}{1 + \\text{RS}}$$
+          *Implementate: $\\text{RSI}_{14}$ e $\\text{RSI}_7$.*
+
+        * **Moving Average Convergence Divergence (MACD):**
+          $$\\text{MACD}_t = \\text{EMA}_{12}(P_t) - \\text{EMA}_{26}(P_t)$$
+          $$\\text{Signal}_t = \\text{EMA}_9(\\text{MACD}_t), \\quad \\text{Hist}_t = \\text{MACD}_t - \\text{Signal}_t$$
+
+        * **Bande di Bollinger:**
+          $$\\text{BB}_{\\text{Middle}} = \\text{SMA}_{20}(t), \\quad \\text{BB}_{\\text{Upper/Lower}} = \\text{BB}_{\\text{Middle}} \\pm 2 \\cdot \\sigma_{20}(P)$$
+
+        * **Average True Range (ATR a 14 periodi):**
+          $$\\text{TR}_t = \\max\\left( H_t - L_t, \\, |H_t - P_{t-1}|, \\, |L_t - P_{t-1}| \\right)$$
+          $$\\text{ATR}_{14}(t) = \\frac{1}{14} \\sum_{i=0}^{13} \\text{TR}_{t-i}$$
+
+        ### 3. Modelli Avanzati (Idea 1 & Idea 3)
+        * **Idea 1 - Forza Relativa vs Benchmark ($RS_{\\text{Ratio}}$):**
+          $$\\text{RS}_t = \\frac{P_t^{\\text{Asset}}}{P_t^{\\text{Benchmark}}}, \\quad \\text{RS}_{\\text{SMA}20} = \\text{SMA}_{20}(\\text{RS}), \\quad \\text{RS}_{\\text{SMA}50} = \\text{SMA}_{50}(\\text{RS})$$
+          Condizione di superiorità strutturale: $\\text{RS}_t > \\text{RS}_{\\text{SMA}20} \\land \\text{RS}_{\\text{SMA}20} > \\text{RS}_{\\text{SMA}50}$.
+
+        * **Idea 3 - Filtro di Regime di Volatilità (ATR Percentile Rank):**
+          Valuta la posizione stocastica dell'ATR odierno rispetto agli ultimi 252 giorni di contrattazione:
+          $$\\text{Rank}_t = \\frac{1}{252} \\sum_{i=0}^{251} \\mathbb{I}(\\text{ATR}_{t-i} \\le \\text{ATR}_t)$$
+          *Se $\\text{Rank}_t > 0.85$ (Regime di Alta Volatilità / Panico), il modello applica una penalizzazione allo score e dilata il buffer di Stop Loss del $30\\%$.*
+
+        ### 4. Matrice di Ponderazione e Calcolo del Quant Score ($S$)
+        Il punteggio globale $S \\in [0, 100]$ parte da un ancoraggio neutro $S_0 = 50.0$ e subisce variazioni additive/sottrattive $\\Delta s_i$:
+        
+        | Fattore Analitico | Condizione Logica al Contorno | Impatto ($\\Delta s_i$) |
+        | :--- | :--- | :--- |
+        | **RSI Confluence** | $\\text{RSI}_{14} < 32 \\land \\text{RSI}_7 < 30$ (Ipervenduto profondo) | $+15$ |
+        | **RSI Confluence** | $\\text{RSI}_{14} > 68 \\land \\text{RSI}_7 > 70$ (Ipercomprato critico) | $-15$ |
+        | **Trend Strutturale** | $P_t > \\text{SMA}_{50} \\land \\text{EMA}_{20} > \\text{SMA}_{50}$ (Uptrend) | $+15$ |
+        | **Trend Strutturale** | $P_t < \\text{SMA}_{50}$ (Downtrend) | $-15$ |
+        | **Forza Relativa (Idea 1)** | $\\text{RS}_t > \\text{RS}_{\\text{SMA}20} > \\text{RS}_{\\text{SMA}50}$ (Sovraperformance) | $+12$ |
+        | **Forza Relativa (Idea 1)** | $\\text{RS}_t < \\text{RS}_{\\text{SMA}20}$ (Sottoperformance) | $-12$ |
+        | **Regime Volatilità (Idea 3)** | $\\text{ATR}_{\\text{Rank}} > 0.85$ (Alta instabilità sistemica) | $-12$ |
+        | **Regime Volatilità (Idea 3)** | $\\text{ATR}_{\\text{Rank}} < 0.20$ (Bassa volatilità / Stabile) | $+6$ |
+        | **Order Flow (Volumi)** | $\\frac{V_t}{\\text{SMA}_{20}(V)} > 1.3 \\land P_t > P_{t-1}$ (Accumulazione) | $+10$ |
+        | **Order Flow (Volumi)** | $\\frac{V_t}{\\text{SMA}_{20}(V)} > 1.3 \\land P_t < P_{t-1}$ (Distribuzione) | $-10$ |
+        | **MACD Momentum** | $\\text{MACD}_t > \\text{Signal}_t \\land \\text{Hist}_t > \\text{Hist}_{t-1}$ (Espansione) | $+8$ |
+        | **Sentiment Web (NLP)** | Polarità media ponderata delle notizie $> +0.04$ | $+8$ |
+        | **Sentiment Web (NLP)** | Polarità media ponderata delle notizie $< -0.04$ | $-8$ |
+
+        Score finale troncato nell'intervallo $[0, 100]$:
+        $$S = \\max\\left(0, \\min\\left(100, 50.0 + \\sum \\Delta s_i\\right)\\right)$$
+
+        ### 5. Regole di Mappatura delle Fasce Operative
+        * **BUY ($S \\ge 62.0$):** Confluenza statistica favorevole. Apertura di posizioni long consigliata.
+        * **HOLD ($38.0 < S < 62.0$):** Zona di indecisione, lateralità o confliggenza tra indicatori. Nessuna operazione.
+        * **SELL ($S \\le 38.0$):** Pressione ribassista o regime di panico. Chiusura posizioni o copertura.
+
+        ### 6. Calcolo Dinamico dei Target Operativi (SL & TP)
+        In base all'orizzonte temporale $H \\in \\{1\\text{D}, 3\\text{D}, 7\\text{D}\\}$, il moltiplicatore temporale $k_h$ assume i seguenti valori:
+        * $H = 1\\text{D} \\implies k_{1\\text{D}} = 1.0$
+        * $H = 3\\text{D} \\implies k_{3\\text{D}} = 1.8$
+        * $H = 7\\text{D} \\implies k_{7\\text{D}} = 2.6$
+
+        Livelli finali di Stop Loss ($\\text{SL}$) e Take Profit ($\\text{TP}$):
+        $$\\text{SL} = P_t - \\left( \\text{ATR}_{14} \\cdot k_h \\cdot \\beta_{\\text{regime}} \\cdot 1.1 \\right)$$
+        $$\\text{TP} = P_t + \\left( \\text{ATR}_{14} \\cdot k_h \\cdot 1.8 \\right)$$
+        *(dove $\\beta_{\\text{regime}} = 1.3$ se l'ATR Percentile supera $0.85$, altrimenti $1.0$).*
         """)
