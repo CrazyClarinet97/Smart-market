@@ -17,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# STILE CSS "LIQUID GLASS" CON TITOLI UNIFORMI
+# STILE CSS "LIQUID GLASS" SEQUENZIALE E PROPORZIONATO
 st.markdown("""
     <style>
     .metric-card {
@@ -305,7 +305,7 @@ def calcola_modello_ml_e_backtest(df, sentiment_score, horizon):
     dettagli = []
     return prob, verdetto, colore, sl_val, sl_pct, tp_val, tp_pct, risk_reward, win_rate, is_macro_bull, dettagli
 
-# UI PRINCIPALE (TITOLO UNIFORME)
+# UI PRINCIPALE
 st.subheader("Trading Tikitò")
 st.write("")
 
@@ -460,7 +460,7 @@ if ticker:
             </div>
         """, unsafe_allow_html=True)
 
-    # 7. BLOCCO SIMULAZIONE POSITION SIZING (TITOLO UNIFORME, INPUT NUMERICI)
+    # 7. BLOCCO SIMULAZIONE POSITION SIZING
     st.write("")
     st.subheader("Simulazione")
     
@@ -499,7 +499,7 @@ if ticker:
         </div>
     """, unsafe_allow_html=True)
 
-    # 8. GRAFICO & INDICATORI
+    # 8. GRAFICO & INDICATORI (MACD CORRETTO E SENZA DUPLICAZIONE DI ARGOMENTI)
     st.write("")
     st.subheader("Grafico & Indicatori")
     
@@ -536,7 +536,8 @@ if ticker:
         curr_row += 1
 
     if "MACD" in ind_options:
-        fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], line=dict(color='#38bdf8', width=1.2), name='MACD'), row=fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], line=dict(color='#f97316', width=1.2), name='Signal'), row=curr_row, col=1), row=curr_row, col=1) # Correzione inline tracciamento MACD
+        fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], line=dict(color='#38bdf8', width=1.2), name='MACD'), row=curr_row, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], line=dict(color='#f97316', width=1.2), name='Signal'), row=curr_row, col=1)
         curr_row += 1
 
     fig.update_layout(
