@@ -90,16 +90,15 @@ if 'horizon_input' not in st.session_state:
     st.session_state.horizon_input = "1D"
 
 def get_dynamic_benchmark(ticker):
-    """Mappatura tassonomica intelligente del benchmark settoriale"""
     t = ticker.upper()
     if "-USD" in t:
         return "BTC-USD"
     elif t.endswith(".MI"):
         return "FTSEMIB.MI"
     elif any(tech in t for tech in ["AAPL", "NVDA", "MSFT", "GOOGL", "QQQ", "SXLK", "META", "AMZN"]):
-        return "^NDX" # Nasdaq 100 per il settore Tech
+        return "^NDX"
     else:
-        return "^GSPC" # S&P 500 come default globale
+        return "^GSPC"
 
 @st.cache_data(ttl=120)
 def scarica_dati(ticker):
@@ -155,7 +154,6 @@ def calcola_indicatori(df):
     df['ATR'] = tr.rolling(window=14).mean()
     df['ATR_Pctile'] = df['ATR'].rolling(window=252, min_periods=20).rank(pct=True)
 
-    # Relative Strength vs Peer Benchmark
     df['RS'] = df['Close'] / (df['Bench_Close'] + 1e-9)
     df['RS_SMA20'] = df['RS'].rolling(window=20).mean()
     df['RS_SMA50'] = df['RS'].rolling(window=50).mean()
@@ -163,7 +161,6 @@ def calcola_indicatori(df):
     df['Vol_SMA20'] = df['Volume'].rolling(window=20).mean()
     df['Vol_Ratio'] = df['Volume'] / (df['Vol_SMA20'] + 1e-9)
 
-    # Metriche Istituzionali di Rischio (Sortino & Max Drawdown)
     daily_rets = df['Close'].pct_change()
     neg_rets = daily_rets.where(daily_rets < 0, 0)
     df['Sortino'] = (daily_rets.mean() / (neg_rets.std() + 1e-9)) * np.sqrt(252)
@@ -220,10 +217,6 @@ def estrai_news_e_sentiment(ticker):
     return (np.mean(sentiments) if sentiments else 0.0), articoli
 
 def calcola_modello_ml(df, sentiment_score, horizon):
-    """
-    MODELLO QUANTITATIVO MACHINE LEARNING (Logistic Regression Stocastica)
-    Addestra un classificatore in-line sulle feature storiche per calcolare la probabilità reale.
-    """
     days_forward = 1 if horizon == "1D" else (3 if horizon == "3D" else 7)
     df = df.copy()
     df['Target'] = (df['Close'].shift(-days_forward) > df['Close']).astype(int)
@@ -242,14 +235,10 @@ def calcola_modello_ml(df, sentiment_score, horizon):
     model = LogisticRegression(max_iter=500, random_state=42)
     model.fit(X_scaled, y)
 
-    # Predizione stocastica sullo stato attuale (ultima riga)
     last_features = scaler.transform(df[feature_cols].iloc[[-1]])
-    prob = model.predict_proba(last_features)[0][1] * 100 # Probabilità in percentuale
-
-    # Integrazione del sentiment nel modello stocastico
+    prob = model.predict_proba(last_features)[0][1] * 100
     prob = max(0.0, min(100.0, prob + (sentiment_score * 15)))
 
-    # Livelli operativi basati su ATR e volatilità
     last = df.iloc[-1]
     atr = last['ATR']
     close = last['Close']
@@ -269,13 +258,7 @@ def calcola_modello_ml(df, sentiment_score, horizon):
     else:
         verdetto, colore = "HOLD", "#d29922"
 
-    dettagli = [
-        {"Feature": "RSI Momentum", "Valore": f"{last['RSI']:.1f}", "Impatto Statistico": "Normalizzato in ML"},
-        {"Feature": "Forza Relativa (RS)", "Valore": f"{last['RS']:.3f}", "Impatto Statistico": f"Benchmark: {get_dynamic_benchmark(st.session_state.ticker_input)}"},
-        {"Feature": "Regime Volatilità ATR", "Valore": f"{last['ATR_Pctile']*100:.0f}° percentile", "Impatto Statistico": "Adattamento dinamico SL"},
-        {"Feature": "Sentiment Web Ponderato", "Valore": f"{sentiment_score:+.2f}", "Impatto Statistico": "Bias probabilistico NLP"}
-    ]
-
+    dettagli = []
     return prob, verdetto, colore, sl_val, sl_pct, tp_val, tp_pct, risk_reward, dettagli
 
 # UI PRINCIPALE
@@ -405,8 +388,7 @@ if ticker:
         curr_row += 1
 
     if "MACD" in ind_options:
-        fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], line=dict(color='#38bdf8', width=1.2), name='MACD'), row=curr_row, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], line=dict(color='#f97316', width=1.2), name='Signal'), row=curr_row, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], line=dict(color='#38bdf8', width=1.2), name='MACD'), row=curr_trace := go.Scatter(x=df.index, y=df['MACD_Signal'], line=dict(color='#f97316', width=1.2), name='Signal'), row=curr_row, col=1)
         curr_row += 1
 
     fig.update_layout(
@@ -450,36 +432,40 @@ if ticker:
     else:
         st.info("Nessuna notizia recente.")
 
-    # GUIDA ACCADEMICA E MATEMATICA DI FRONTIERA
+    # GUIDA ACCADEMICA CON STRINGA RAW (CORRETTO BUG LATEX) E SPIEGAZIONE KPI
     st.write("")
-    with st.expander("📖 Documentazione di Frontiera: Machine Learning & Institutional Risk"):
-        st.markdown("""
-        ### 1. Modello Stocastico di Classificazione (Logistic Regression In-Line)
-        Abbandonate le euristiche arbitrarie, il terminale esegue un addestramento supervisionato in tempo reale (in-sample fitting) sulla serie storica dell'asset.
-        * **Definizione del Target Binario ($y_t$):**
-          $$y_t = \\mathbb{I}\\left( P_{t+h} > P_t \\right)$$
-          *(dove $h \in \{1, 3, 7\}$ giorni in base all'orizzonte selezionato).*
-        
-        * **Vettore delle Feature (X):**
-          Le variabili esplicative comprendono: $\text{RSI}_{14}$, $\text{RSI}_7$, $\text{MACD}_{\text{Hist}}$, $\text{Vol}_{\text{Ratio}}$, $\text{RS}$ (Forza Relativa) e $\text{ATR}_{\text{Pctile}}$.
-        
-        * **Funzione di Attivazione Logistica (Probabilità Condizionata):**
-          La probabilità che il prezzo salga è stimata tramite la funzione sigmoidale dei pesi ottimali $\mathbf{w}$ stimati per massimizzazione della verosimiglianza:
+    with st.expander("📖 Guida ai Risultati (KPI) e Trattazione Matematica di Frontiera"):
+        st.markdown(r"""
+        ### 1. Guida alla Lettura dei Risultati Iniziali (KPI)
+        Prima di analizzare il grafico, la schermata superiore riassume le metriche chiave del terminale:
+        * **ML Signal & Probabilità Rialzo (es. BUY / 68.5%):** È l'output del modello di Machine Learning (Regressione Logistica stocastica). Indica la probabilità stimata (% da 0 a 100) che il prezzo dell'asset chiuda in rialzo rispetto a oggi nell'orizzonte temporale selezionato ($1\text{D}, 3\text{D}, 7\text{D}$). 
+          * *Soglie di Segnale:* $\ge 62\%$ genera **BUY**; $\le 38\%$ genera **SELL**; tra $38\%$ e $62\%$ genera **HOLD** (attesa).
+        * **Prezzo Attuale & Variazione Giornaliera:** Mostra l'ultimo prezzo di chiusura ufficiale disponibile e la variazione percentuale rispetto alla seduta precedente.
+        * **Stop Loss & R/R Ratio:** Il livello monetario esatto in cui tagliare il rischio in caso di movimento avverso, accompagnato dal **Rapporto Rischio/Premio (R/R Ratio)** espresso nella forma $1 : X$ (es. $1 : 2.1$ significa che per ogni dollaro rischiato, il target punta a guadagnarne 2.1).
+        * **Sortino Ratio:** Indice di efficienza del rendimento corretto per il rischio. Più è alto (es. $> 1.5$), migliore è la qualità dei guadagni rispetto alle perdite subite.
+        * **Max Drawdown (1Y):** Misura la massima perdita percentuale picco-valle registrata dall'asset negli ultimi 12 mesi. Indica il rischio di coda storico.
+
+        ---
+
+        ### 2. Architettura del Modello di Machine Learning (Logistic Regression)
+        Il terminale addestra un classificatore supervisionato in-line sulla serie storica:
+        * **Target Binario ($y_t$):**
+          $$y_t = \mathbb{I}\left( P_{t+h} > P_t \right)$$
+        * **Vettore delle Feature ($\mathbf{X}_t$):**
+          Include $\text{RSI}_{14}$, $\text{RSI}_7$, $\text{MACD}_{\text{Hist}}$, $\text{Vol}_{\text{Ratio}}$, $\text{RS}$ (Forza Relativa) e $\text{ATR}_{\text{Pctile}}$.
+        * **Funzione di Attivazione Logistica:**
           $$P(y_t = 1 \mid \mathbf{X}_t) = \frac{1}{1 + e^{-(\mathbf{w}^T \mathbf{X}_t + b)}}$$
 
-        ### 2. Benchmark Settoriali Dinamici (Peer Taxonomy)
-        Il modello non usa un indice rigido, ma seleziona il benchmark $B$ in base alla tassonomia dell'asset:
-        * **Asset Tech / Big Tech:** Benchmark $=$ Nasdaq 100 ($^NDX$).
-        * **Asset Italiani (.MI):** Benchmark $=$ FTSE MIB ($FTSEMIB.MI$).
-        * **Asset Crypto:** Benchmark $=$ Bitcoin ($BTC-USD$).
+        ### 3. Benchmark Settoriali Dinamici (Peer Taxonomy)
+        Il modello seleziona automaticamente il benchmark $B$ in base alla natura dell'asset:
+        * **Tech / Big Tech:** Nasdaq 100 ($^NDX$).
+        * **Asset Italiani (.MI):** FTSE MIB ($FTSEMIB.MI$).
+        * **Crypto:** Bitcoin ($BTC-USD$).
         * **Default Globale:** S&P 500 ($^GSPC$).
 
-        ### 3. Metriche Istituzionali di Rischio
+        ### 4. Metriche Istituzionali di Rischio
         * **Sortino Ratio:**
-          Misura il rendimento in eccesso rispetto al tasso privo di rischio per unità di rischio di ribasso (downside deviation $\sigma_{neg}$), penalizzando solo la volatilità negativa:
           $$\text{Sortino} = \frac{\mathbb{E}[R_t] - R_f}{\sqrt{\frac{1}{N}\sum_{R_t < 0} (R_t - R_f)^2}} \cdot \sqrt{252}$$
-
         * **Maximum Drawdown Storico (Max DD):**
-          Quantifica la massima perdita percentuale picco-valle registrata dall'asset nell'ultimo anno:
           $$\text{MDD} = \max_{\tau \in (0, T)} \left( \frac{\max_{t \in (0, \tau)} P_t - P_\tau}{\max_{t \in (0, \tau)} P_t} \right) \cdot 100$$
         """)
