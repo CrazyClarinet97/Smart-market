@@ -15,44 +15,48 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# STILE CSS (Minimal, Serio, Dark, Font compatti)
+# STILE CSS "LIQUID GLASS" UNIVERSALE (Perfetto sia per Tema Chiaro che Scuro)
 st.markdown("""
     <style>
-    .stApp {
-        background-color: #0b0f19;
-        color: #d1d5db;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    /* Adattamento automatico delle card con effetto Liquid Glass */
+    .metric-card {
+        background: rgba(150, 150, 150, 0.06);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(150, 150, 150, 0.15);
+        border-radius: 12px;
+        padding: 12px;
+        margin-bottom: 8px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
     }
+    
+    @media (prefers-color-scheme: dark) {
+        .metric-card {
+            background: rgba(25, 30, 45, 0.45);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+        }
+    }
+
     h1 {
         font-size: 1.2rem !important;
         font-weight: 600 !important;
-        color: #f3f4f6 !important;
         margin: 0 !important;
         padding: 0 !important;
-    }
-    .metric-card {
-        background-color: #111827;
-        border: 1px solid #1f2937;
-        border-radius: 10px;
-        padding: 12px;
-        margin-bottom: 8px;
     }
     .metric-value {
         font-size: 16px;
         font-weight: 700;
-        color: #38bdf8;
+        color: #0284c7;
+    }
+    @media (prefers-color-scheme: dark) {
+        .metric-value { color: #38bdf8; }
     }
     .metric-label {
         font-size: 10px;
-        color: #9ca3af;
+        opacity: 0.7;
         text-transform: uppercase;
         letter-spacing: 0.5px;
-    }
-    input, div[data-baseweb="select"] > div {
-        background-color: #111827 !important;
-        color: #f3f4f6 !important;
-        border-color: #374151 !important;
-        font-size: 13px !important;
     }
     .stButton button {
         background-color: #0284c7 !important;
@@ -67,14 +71,14 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Gestione Session State per evitare reset e sbalzi di focus
+# Gestione Session State per evitare reset
 if 'ticker_input' not in st.session_state:
     st.session_state.ticker_input = "AAPL"
 if 'horizon_input' not in st.session_state:
     st.session_state.horizon_input = "1D"
 
 # ---------------------------------------------------------
-# FUNZIONI DI CALCOLO E DATI (CON CACHE)
+# FUNZIONI DI CALCOLO E DATI
 # ---------------------------------------------------------
 @st.cache_data(ttl=120)
 def scarica_dati(ticker):
@@ -205,7 +209,7 @@ def calcola_modello(df, sentiment_score, horizon):
     return verdetto, score, colore, sl_val, sl_pct, tp_val, tp_pct, risk_reward, dettagli
 
 # ---------------------------------------------------------
-# INTERFACCIA UTENTE PULITA
+# INTERFACCIA UTENTE
 # ---------------------------------------------------------
 header_col1, header_col2 = st.columns([3, 1])
 with header_col1:
@@ -215,7 +219,6 @@ with header_col2:
 
 st.write("")
 
-# ControlliTicker e Orizzonte
 c1, c2 = st.columns([2, 1])
 with c1:
     st.session_state.ticker_input = st.text_input("Ticker:", value=st.session_state.ticker_input).upper().strip()
@@ -241,7 +244,7 @@ if ticker:
         last_price = df['Close'].iloc[-1]
         change_pct = ((df['Close'].iloc[-1] - df['Close'].iloc[-2]) / df['Close'].iloc[-2]) * 100
 
-    # SCHEDA VERDETTO
+    # SCHEDA VERDETTO LIQUID GLASS
     st.markdown(f"""
         <div class="metric-card" style="border-left: 5px solid {colore};">
             <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -251,7 +254,7 @@ if ticker:
                 </div>
                 <div style="text-align: right;">
                     <span class="metric-label">Score Confidenza</span>
-                    <div style="font-size: 18px; font-weight: bold; color: #f3f4f6;">{score}/100</div>
+                    <div style="font-size: 18px; font-weight: bold;">{score}/100</div>
                 </div>
             </div>
         </div>
@@ -266,9 +269,9 @@ if ticker:
     with k3:
         st.markdown(f"""<div class="metric-card"><span class="metric-label">Take Profit</span><div class="metric-value" style="color:#238636;">${tp_val:.2f}</div><span style="color:#238636; font-size:11px;">{tp_pct:+.2f}%</span></div>""", unsafe_allow_html=True)
     with k4:
-        st.markdown(f"""<div class="metric-card"><span class="metric-label">R/R Ratio</span><div class="metric-value" style="color:#38bdf8;">1 : {risk_reward:.1f}</div><span style="color:#9ca3af; font-size:11px;">Rischio/Beneficio</span></div>""", unsafe_allow_html=True)
+        st.markdown(f"""<div class="metric-card"><span class="metric-label">R/R Ratio</span><div class="metric-value">1 : {risk_reward:.1f}</div><span class="metric-label">Rischio/Beneficio</span></div>""", unsafe_allow_html=True)
 
-    # GRAFICO INTEGRATO E STABILE
+    # GRAFICO CON TOOLBAR ATTIVA (PAN, ZOOM BOX E PULSANTI)
     st.write("")
     st.subheader("Grafico & Indicatori")
     
@@ -294,8 +297,8 @@ if ticker:
     if "EMA20" in ind_options:
         fig.add_trace(go.Scatter(x=df.index, y=df['EMA20'], line=dict(color='#38bdf8', width=1), name='EMA20'), row=1, col=1)
     if "Bande di Bollinger" in ind_options:
-        fig.add_trace(go.Scatter(x=df.index, y=df['BB_Upper'], line=dict(color='rgba(255,255,255,0.2)', width=1), name='BB Up'), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['BB_Lower'], line=dict(color='rgba(255,255,255,0.2)', width=1), fill='tonexty', fillcolor='rgba(255,255,255,0.03)', name='BB Low'), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['BB_Upper'], line=dict(color='rgba(150,150,150,0.3)', width=1), name='BB Up'), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['BB_Lower'], line=dict(color='rgba(150,150,150,0.3)', width=1), fill='tonexty', fillcolor='rgba(150,150,150,0.05)', name='BB Low'), row=1, col=1)
 
     curr_row = 2
     if "RSI" in ind_options:
@@ -311,15 +314,16 @@ if ticker:
 
     fig.update_layout(
         template="plotly_dark",
-        paper_bgcolor="#0b0f19",
-        plot_bgcolor="#111827",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
         margin=dict(l=5, r=5, t=5, b=5),
         height=450,
         xaxis_rangeslider_visible=False,
         showlegend=False
     )
     
-    st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True, 'displayModeBar': False})
+    # Riattivata la modalità standard con barra degli strumenti visibile (per passare da Zoom a Riquadro a Pan liberamente)
+    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True, 'scrollZoom': True})
 
     # NOTIZIE RECENTI
     st.write("")
@@ -329,8 +333,8 @@ if ticker:
             sc_col = "#22c55e" if art['score'] > 0 else ("#ef4444" if art['score'] < 0 else "#9ca3af")
             st.markdown(f"""
                 <div class="metric-card">
-                    <a href="{art['link']}" target="_blank" style="color:#38bdf8; font-weight:500; font-size:12px; text-decoration:none;">{art['title']}</a>
-                    <div style="display:flex; justify-content:space-between; margin-top:3px; font-size:10px; color:#9ca3af;">
+                    <a href="{art['link']}" target="_blank" style="color:#0284c7; font-weight:500; font-size:12px; text-decoration:none;">{art['title']}</a>
+                    <div style="display:flex; justify-content:space-between; margin-top:3px; font-size:10px;" class="metric-label">
                         <span>{art['publisher']}</span>
                         <span style="color:{sc_col}; font-weight:bold;">Sentiment: {art['score']:+.2f}</span>
                     </div>
@@ -339,7 +343,7 @@ if ticker:
     else:
         st.info("Nessuna notizia recente.")
 
-    # GUIDA SPOSTATA RIGOROSAMENTE IN FONDO
+    # GUIDA IN FONDO
     st.write("")
     with st.expander("📖 Guida ai Calcoli e Logica del Modello"):
         st.write("Il punteggio **Score (0-100)** valuta la confluenza dei seguenti fattori tecnici e di sentiment:")
