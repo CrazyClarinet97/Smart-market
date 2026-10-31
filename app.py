@@ -15,7 +15,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# STILE CSS "LIQUID GLASS" UNIVERSALE
+# STILE CSS "LIQUID GLASS" PERFETTO E PROPORZIONATO
 st.markdown("""
     <style>
     .metric-card {
@@ -24,9 +24,10 @@ st.markdown("""
         -webkit-backdrop-filter: blur(12px);
         border: 1px solid rgba(150, 150, 150, 0.15);
         border-radius: 12px;
-        padding: 12px;
-        margin-bottom: 8px;
+        padding: 14px 16px;
+        margin-bottom: 10px;
         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+        height: 100%;
     }
     @media (prefers-color-scheme: dark) {
         .metric-card {
@@ -41,29 +42,25 @@ st.markdown("""
         margin: 0 !important;
         padding: 0 !important;
     }
-    .metric-value {
-        font-size: 16px;
+    .metric-label {
+        font-size: 11px;
+        opacity: 0.7;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
+    }
+    .metric-val {
+        font-size: 17px;
         font-weight: 700;
         color: #0284c7;
     }
     @media (prefers-color-scheme: dark) {
-        .metric-value { color: #38bdf8; }
+        .metric-val { color: #38bdf8; }
     }
-    .metric-label {
-        font-size: 10px;
-        opacity: 0.7;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
-    .stButton button {
-        background-color: #0284c7 !important;
-        color: white !important;
-        border: none !important;
-        border-radius: 8px !important;
-        font-size: 12px !important;
-        font-weight: 500 !important;
-        width: 100%;
-        height: 38px;
+    .metric-sub {
+        font-size: 11px;
+        font-weight: 600;
+        margin-top: 2px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -80,7 +77,6 @@ def scarica_dati(ticker):
         return None
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
-    # Pulisce eventuali righe NaN in fondo
     df = df.dropna(subset=['Close'])
     return df
 
@@ -121,15 +117,13 @@ def estrai_news_e_sentiment(ticker):
         url = f"https://query2.finance.yahoo.com/v1/finance/search?q={ticker}"
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers).json()
-        news_list = response.get('news', [])[:10] # Aumentato a 10 notizie
+        news_list = response.get('news', [])[:10]
         
         sentiments, articoli = [], []
         for item in news_list:
             title = item.get('title', '')
             link = item.get('link', '#')
             publisher = item.get('publisher', 'Fonte Web')
-            
-            # Assegnazione peso di affidabilità in base alla fonte nota o lunghezza titolo
             reliability = 1.2 if any(f in publisher.lower() for f in ['reuters', 'bloomberg', 'wsj', 'financial times', 'yahoo']) else 1.0
             
             analysis = TextBlob(title)
@@ -137,17 +131,11 @@ def estrai_news_e_sentiment(ticker):
             sentiments.append(polarity)
             
             articoli.append({
-                'title': title, 
-                'link': link, 
-                'publisher': publisher, 
-                'score': polarity,
-                'weight': reliability
+                'title': title, 'link': link, 'publisher': publisher, 'score': polarity, 'weight': reliability
             })
         
-        # Ordina per affidabilità e rilevanza stimata
         articoli = sorted(articoli, key=lambda x: x['weight'], reverse=True)
-        avg_sentiment = np.mean(sentiments) if sentiments else 0.0
-        return avg_sentiment, articoli
+        return (np.mean(sentiments) if sentiments else 0.0), articoli
     except:
         return 0.0, []
 
@@ -218,12 +206,7 @@ def calcola_modello(df, sentiment_score, horizon):
     return verdetto, score, colore, sl_val, sl_pct, tp_val, tp_pct, risk_reward, dettagli
 
 # UI PRINCIPALE
-header_col1, header_col2 = st.columns([3, 1])
-with header_col1:
-    st.markdown("<h1>Market Terminal</h1>", unsafe_allow_html=True)
-with header_col2:
-    update_btn = st.button("🔄 Aggiorna Dati")
-
+st.markdown("<h1>Market Terminal</h1>", unsafe_allow_html=True)
 st.write("")
 
 c1, c2 = st.columns([2, 1])
@@ -234,9 +217,6 @@ with c2:
 
 ticker = st.session_state.ticker_input
 horizon = st.session_state.horizon_input
-
-if update_btn:
-    st.cache_data.clear()
 
 if ticker:
     with st.spinner("Elaborazione dati in corso..."):
@@ -255,7 +235,7 @@ if ticker:
 
     # DATA ULTIMO DATO DISPONIBILE
     st.markdown(f"""
-        <div style="font-size: 11px; opacity: 0.7; margin-bottom: 6px;">
+        <div style="font-size: 11px; opacity: 0.7; margin-bottom: 8px;">
             📅 Ultimo dato di borsa disponibile: <b style="color: #0284c7;">{last_date}</b>
         </div>
     """, unsafe_allow_html=True)
@@ -270,22 +250,47 @@ if ticker:
                 </div>
                 <div style="text-align: right;">
                     <span class="metric-label">Score Confidenza</span>
-                    <div style="font-size: 18px; font-weight: bold;">{score}/100</div>
+                    <div style="font-size: 17px; font-weight: bold;">{score}/100</div>
                 </div>
             </div>
         </div>
     """, unsafe_allow_html=True)
 
-    # KPI RIGHE
+    # KPI RIGHE (PERFETTAMENTE PROPORZIONATE)
     k1, k2, k3, k4 = st.columns(4)
     with k1:
-        st.markdown(f"""<div class="metric-card"><span class="metric-label">Prezzo</span><div class="metric-value">${last_price:.2f}</div><span style="color:{'#238636' if change_pct>=0 else '#da3633'}; font-size:11px;">{change_pct:+.2f}%</span></div>""", unsafe_allow_html=True)
+        ch_color = '#238636' if change_pct >= 0 else '#da3633'
+        st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-label">Prezzo Attuale</div>
+                <div class="metric-val">${last_price:.2f}</div>
+                <div class="metric-sub" style="color: {ch_color};">{change_pct:+.2f}% oggi</div>
+            </div>
+        """, unsafe_allow_html=True)
     with k2:
-        st.markdown(f"""<div class="metric-card"><span class="metric-label">Stop Loss</span><div class="metric-value" style="color:#da3633;">${sl_val:.2f}</div><span style="color:#da3633; font-size:11px;">{sl_pct:.2f}%</span></div>""", unsafe_allow_html=True)
+        st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-label">Stop Loss</div>
+                <div class="metric-val" style="color: #da3633;">${sl_val:.2f}</div>
+                <div class="metric-sub" style="color: #da3633;">{sl_pct:.2f}%</div>
+            </div>
+        """, unsafe_allow_html=True)
     with k3:
-        st.markdown(f"""<div class="metric-card"><span class="metric-label">Take Profit</span><div class="metric-value" style="color:#238636;">${tp_val:.2f}</div><span style="color:#238636; font-size:11px;">{tp_pct:+.2f}%</span></div>""", unsafe_allow_html=True)
+        st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-label">Take Profit</div>
+                <div class="metric-val" style="color: #238636;">${tp_val:.2f}</div>
+                <div class="metric-sub" style="color: #238636;">{tp_pct:+.2f}%</div>
+            </div>
+        """, unsafe_allow_html=True)
     with k4:
-        st.markdown(f"""<div class="metric-card"><span class="metric-label">R/R Ratio</span><div class="metric-value">1 : {risk_reward:.1f}</div><span class="metric-label">Rischio/Beneficio</span></div>""", unsafe_allow_html=True)
+        st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-label">R/R Ratio</div>
+                <div class="metric-val">1 : {risk_reward:.1f}</div>
+                <div class="metric-sub" style="opacity: 0.7;">Rischio / Premio</div>
+            </div>
+        """, unsafe_allow_html=True)
 
     # GRAFICO
     st.write("")
@@ -344,11 +349,10 @@ if ticker:
     st.write("")
     st.subheader("Notizie Web & Sentiment (Top 10)")
     
-    # Abstract sintetico basato sul sentiment medio
     sent_label = "Fortemente Rialzista" if avg_sentiment > 0.15 else ("Rialzista Moderato" if avg_sentiment > 0.02 else ("Neutro / Laterale" if avg_sentiment >= -0.02 else "Ribassista"))
     st.markdown(f"""
         <div class="metric-card" style="margin-bottom: 14px;">
-            <span class="metric-label">Abstract Sentiment Globale</span>
+            <div class="metric-label">Abstract Sentiment Globale</div>
             <div style="font-size: 13px; margin-top: 4px; font-weight: 500;">
                 Il sentiment ponderato delle prime 10 fonti web risulta <b>{sent_label}</b> (Indice medio: <code>{avg_sentiment:+.2f}</code>). Le notizie primarie evidenziano un flusso informativo coerente con la struttura tecnica dell'asset.
             </div>
