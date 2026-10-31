@@ -114,7 +114,7 @@ def calcola_indicatori(df):
     rs7 = gain7 / (loss7 + 1e-9)
     df['RSI7'] = 100 - (100 / (1 + rs7))
 
-    # MACD Avanzato
+    # MACD
     ema12 = df['Close'].ewm(span=12, adjust=False).mean()
     ema26 = df['Close'].ewm(span=26, adjust=False).mean()
     df['MACD'] = ema12 - ema26
@@ -126,10 +126,8 @@ def calcola_indicatori(df):
     std = df['Close'].rolling(window=20).std()
     df['BB_Upper'] = df['BB_Middle'] + (std * 2)
     df['BB_Lower'] = df['BB_Middle'] - (std * 2)
-    # Posizione % all'interno delle bande (0 = banda inf, 1 = banda sup)
-    df['BB_Pct'] = (df['Close'] - df['BB_Lower']) / (df['BB_Upper'] - df['BB_Lower'] + 1e-9)
 
-    # ATR (Volatility)
+    # ATR (Average True Range)
     tr1 = df['High'] - df['Low']
     tr2 = abs(df['High'] - df['Close'].shift())
     tr3 = abs(df['Low'] - df['Close'].shift())
@@ -170,92 +168,85 @@ def estrai_news_e_sentiment(ticker):
 
 def calcola_modello_quant(df, sentiment_score, horizon):
     """
-    MODELLO QUANTITATIVO AVANZATO (Multi-Factor Scoring Matrix)
-    Assegna punteggi basati su soglie statistiche e confluenza di indicatori.
+    MODELLO QUANTITATIVO MULTI-FACTOR SCORING MATRIX
     """
     last = df.iloc[-1]
     prev = df.iloc[-2]
     dettagli = []
     score = 50.0  # Base neutra
 
-    # 1. Analisi RSI Multi-Timeframe (14 e 7)
+    # 1. RSI Confluence (14 & 7)
     rsi14 = last['RSI']
     rsi7 = last['RSI7']
     if rsi14 < 32 and rsi7 < 30:
         score += 18
-        dettagli.append({"Fattore": "RSI Confluenza (14 & 7)", "Impatto": "+18 pt", "Stato": f"Ipervenduto profondo (RSI14: {rsi14:.1f}, RSI7: {rsi7:.1f})"})
+        dettagli.append({"Fattore": "RSI Confluence (14 & 7)", "Peso": "+18", "Stato": f"Ipervenduto profondo (RSI14: {rsi14:.1f}, RSI7: {rsi7:.1f})"})
     elif rsi14 > 68 and rsi7 > 70:
         score -= 18
-        dettagli.append({"Fattore": "RSI Confluenza (14 & 7)", "Impatto": "-18 pt", "Stato": f"Ipercomprato critico (RSI14: {rsi14:.1f}, RSI7: {rsi7:.1f})"})
+        dettagli.append({"Fattore": "RSI Confluence (14 & 7)", "Peso": "-18", "Stato": f"Ipercomprato critico (RSI14: {rsi14:.1f}, RSI7: {rsi7:.1f})"})
     else:
         score += 4
-        dettagli.append({"Fattore": "RSI (14)", "Impatto": "+4 pt", "Stato": f"Fascia di equilibrio ({rsi14:.1f})"})
+        dettagli.append({"Fattore": "RSI (14)", "Peso": "+4", "Stato": f"Fascia di equilibrio ({rsi14:.1f})"})
 
-    # 2. Struttura di Trend (SMA50 & EMA20)
+    # 2. Trend Strutturale (SMA50 & EMA20)
     if last['Close'] > last['SMA50'] and last['EMA20'] > last['SMA50']:
         score += 18
-        dettagli.append({"Fattore": "Trend Strutturale (SMA50/EMA20)", "Impatto": "+18 pt", "Stato": "Prezzo saldamente in uptrend sopra le medie"})
+        dettagli.append({"Fattore": "Trend Strutturale (SMA50/EMA20)", "Peso": "+18", "Stato": "Uptrend confermato sopra le medie"})
     elif last['Close'] < last['SMA50']:
         score -= 18
-        dettagli.append({"Fattore": "Trend Strutturale (SMA50)", "Impatto": "-18 pt", "Stato": "Prezzo sotto la SMA50 (Bearish bias)"})
+        dettagli.append({"Fattore": "Trend Strutturale (SMA50)", "Peso": "-18", "Stato": "Downtrend sotto la SMA50"})
 
-    # 3. Analisi Volumi e Spinta (Volume Ratio & Price Action)
+    # 3. Order Flow (Volume Ratio)
     vol_ratio = last['Vol_Ratio']
     if vol_ratio > 1.3 and last['Close'] > prev['Close']:
         score += 14
-        dettagli.append({"Fattore": "Order Flow (Volumi)", "Impatto": "+14 pt", "Stato": f"Accumulazione forte (Volumi {vol_ratio:.1f}x la media)"})
+        dettagli.append({"Fattore": "Order Flow (Volumi)", "Peso": "+14", "Stato": f"Pressione d'acquisto (Vol {vol_ratio:.1f}x)"})
     elif vol_ratio > 1.3 and last['Close'] < prev['Close']:
         score -= 14
-        dettagli.append({"Fattore": "Order Flow (Volumi)", "Impatto": "-14 pt", "Stato": f"Distribuzione / Scarico (Volumi {vol_ratio:.1f}x la media)"})
+        dettagli.append({"Fattore": "Order Flow (Volumi)", "Peso": "-14", "Stato": f"Pressione di scarico (Vol {vol_ratio:.1f}x)"})
 
-    # 4. Momentum MACD (Linea e Istogramma)
+    # 4. MACD Momentum
     if last['MACD'] > last['MACD_Signal'] and last['MACD_Hist'] > prev['MACD_Hist']:
         score += 12
-        dettagli.append({"Fattore": "MACD Momentum", "Impatto": "+12 pt", "Stato": "Crossover rialzista e istogramma in espansione"})
+        dettagli.append({"Fattore": "MACD Momentum", "Peso": "+12", "Stato": "Crossover e istogramma espansivo"})
     elif last['MACD'] < last['MACD_Signal']:
         score -= 12
-        dettagli.append({"Fattore": "MACD Momentum", "Impatto": "-12 pt", "Stato": "Sotto la linea di segnale"})
+        dettagli.append({"Fattore": "MACD Momentum", "Peso": "-12", "Stato": "Sotto la linea di segnale"})
 
-    # 5. Sentiment Ponderato delle News
+    # 5. Sentiment Ponderato
     if sentiment_score > 0.04:
         score += 10
-        dettagli.append({"Fattore": "Sentiment Web Ponderato", "Impatto": "+10 pt", "Stato": f"Flusso notizie positivo (+{sentiment_score:.2f})"})
+        dettagli.append({"Fattore": "Sentiment Web", "Peso": "+10", "Stato": f"Flusso notizie positivo (+{sentiment_score:.2f})"})
     elif sentiment_score < -0.04:
         score -= 10
-        dettagli.append({"Fattore": "Sentiment Web Ponderato", "Impatto": "-10 pt", "Stato": f"Flusso notizie negativo ({sentiment_score:.2f})"})
+        dettagli.append({"Fattore": "Sentiment Web", "Peso": "-10", "Stato": f"Flusso notizie negativo ({sentiment_score:.2f})"})
 
     score = max(0.0, min(100.0, score))
 
-    # Calcolo Dinamico SL / TP basato su ATR e Orizzonte (1D, 3D, 7D)
+    # ATR e Orizzonte
     atr = last['ATR']
     close = last['Close']
     
-    # Coefficienti temporali basati su test quantitativi di volatilità
     if horizon == "1D":
-        atr_mult = 1.0
-        sl_buffer = 1.1
-        tp_buffer = 1.8
+        atr_mult, sl_buf, tp_buf = 1.0, 1.1, 1.8
     elif horizon == "3D":
-        atr_mult = 1.8
-        sl_buffer = 1.2
-        tp_buffer = 2.2
-    else:  # 7D
-        atr_mult = 2.6
-        sl_buffer = 1.3
-        tp_buffer = 2.8
+        atr_mult, sl_buf, tp_buf = 1.8, 1.2, 2.2
+    else:
+        atr_mult, sl_buf, tp_buf = 2.6, 1.3, 2.8
 
-    sl_val = close - (atr * atr_mult * sl_buffer)
-    tp_val = close + (atr * atr_mult * tp_buffer)
+    sl_val = close - (atr * atr_mult * sl_buf)
+    tp_val = close + (atr * atr_mult * tp_buf)
     sl_pct = ((sl_val - close) / close) * 100
     tp_pct = ((tp_val - close) / close) * 100
     risk_reward = abs(tp_pct / sl_pct) if sl_pct != 0 else 0
 
-    if score >= 62:
-        verdetto, colore = "BUY (ACQUISTO)", "#238636"
-    elif score <= 38:
-        verdetto, colore = "SELL (VENDITA)", "#da3633"
+    # SOGLIE MATEMATICHE DEL VERDETTO
+    if score >= 62.0:
+        verdetto, colore = "BUY", "#238636"
+    elif score <= 38.0:
+        verdetto, colore = "SELL", "#da3633"
     else:
-        verdetto, colore = "HOLD (ATTENDI)", "#d29922"
+        verdetto, colore = "HOLD", "#d29922"
 
     return verdetto, score, colore, sl_val, sl_pct, tp_val, tp_pct, risk_reward, dettagli
 
@@ -287,7 +278,7 @@ if ticker:
         last_price = df['Close'].iloc[-1]
         change_pct = ((df['Close'].iloc[-1] - df['Close'].iloc[-2]) / df['Close'].iloc[-2]) * 100
 
-    # BOX DATA ULTIMO DATO (BEN VISIBILE E PULITO)
+    # BOX DATA
     st.markdown(f"""
         <div class="date-card">
             <span>📅</span>
@@ -295,23 +286,23 @@ if ticker:
         </div>
     """, unsafe_allow_html=True)
 
-    # SCHEDA VERDETTO
+    # SCHEDA VERDETTO (PULITA E COMPATTA)
     st.markdown(f"""
         <div class="metric-card" style="border-left: 5px solid {colore};">
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div>
-                    <span class="metric-label">Verdetto Modello Quant ({horizon})</span>
-                    <h3 style="margin: 0; color: {colore} !important;">{verdetto}</h3>
+                    <span class="metric-label">Signal ({horizon})</span>
+                    <div style="font-size: 20px; font-weight: 800; color: {colore}; margin-top: 2px;">{verdetto}</div>
                 </div>
                 <div style="text-align: right;">
-                    <span class="metric-label">Score Affidabilità</span>
-                    <div style="font-size: 17px; font-weight: bold;">{score:.0f}/100</div>
+                    <span class="metric-label">Quant Score</span>
+                    <div style="font-size: 18px; font-weight: bold;">{score:.0f} / 100</div>
                 </div>
             </div>
         </div>
     """, unsafe_allow_html=True)
 
-    # KPI RIGHE (PROPORZIONATE)
+    # KPI RIGHE
     k1, k2, k3, k4 = st.columns(4)
     with k1:
         ch_color = '#238636' if change_pct >= 0 else '#da3633'
@@ -400,7 +391,7 @@ if ticker:
     
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True, 'scrollZoom': True})
 
-    # NOTIZIE & ABSTRACT SENTIMENT A VALLE
+    # NOTIZIE & ABSTRACT SENTIMENT
     st.write("")
     st.subheader("Notizie Web & Sentiment (Top 10)")
     
@@ -419,7 +410,7 @@ if ticker:
             sc_col = "#22c55e" if art['score'] > 0 else ("#ef4444" if art['score'] < 0 else "#9ca3af")
             st.markdown(f"""
                 <div class="metric-card">
-                    <a href="{art['link']}" target="_blank" style="color:#0284c7; font-weight:500; font-size:12px; text-decoration:none;">{art['title']}</a>
+                    <a href="{art['link']} " target="_blank" style="color:#0284c7; font-weight:500; font-size:12px; text-decoration:none;">{art['title']}</a>
                     <div style="display:flex; justify-content:space-between; margin-top:3px; font-size:10px;" class="metric-label">
                         <span>Fonte: {art['publisher']} (Affidabilità: {art['weight']}x)</span>
                         <span style="color:{sc_col}; font-weight:bold;">Sentiment: {art['score']:+.2f}</span>
@@ -429,23 +420,46 @@ if ticker:
     else:
         st.info("Nessuna notizia recente.")
 
-    # GUIDA AI CALCOLI E FORMULE (RIGOROSAMENTE IN FONDO)
+    # =========================================================
+    # GUIDA MATEMATICA E FORMALE DEL MODELLO (RIGOROSAMENTE IN FONDO)
+    # =========================================================
     st.write("")
-    with st.expander("📖 Guida ai Calcoli Quantitativi e Formule del Modello"):
+    with st.expander("📖 Documentazione Matematica e Modello Quantitativo"):
         st.markdown("""
-        ### Come funziona il Modello Quantitativo
-        Il punteggio di affidabilità **Score (0-100)** parte da una base neutra di 50 punti e applica correzioni basate sulla confluenza statistica di 5 fattori chiave:
+        ### 1. Architettura del Modello Quantitativo (Multi-Factor Scoring)
+        Il terminale calcola uno **Score Globale** $S \in [0, 100]$ partendo da un'assunzione di neutralità pari a $50.0$. Ciascun indicatore applica una variazione discreta $\\Delta s_i$ in base allo stato stocastico e strutturale dell'asset:
         """)
         st.table(pd.DataFrame(dettagli))
         st.markdown("""
-        ### Formule Matematiche e Regimi di Orizzonte
-        * **1. Volatilità (ATR - Average True Range):** 
-          Misura l'escursione media dei prezzi negli ultimi 14 periodi per stimare il rischio di mercato:
-          $$\\text{ATR} = \\frac{1}{14} \\sum_{i=1}^{14} \\max(\\text{High}_i - \\text{Low}_i, |\\text{High}_i - \\text{Close}_{i-1}|, |\\text{Low}_i - \\text{Close}_{i-1}|)$$
+        ### 2. Logica delle Fasce Operative e Criteri di Ingresso
+        Il modello mappa lo score finale $S$ in tre regimi operativi discreti:
+        * **Fascia BUY ($S \\ge 62.0$):** 
+          * *Condizione:* Confluenza statistica positiva. Il trend strutturale è rialzista, i volumi confermano la spinta in acquito e gli oscillatori di momentum (RSI/MACD) non si trovano in zone di esaurimento estremo.
+          * *Strategia:* Apertura di posizioni long con target di profitto basati sui multipli di volatilità.
+        * **Fascia HOLD ($38.0 < S < 62.0$):** 
+          * *Condizione:* Regime di indecisione, lateralità o divergenza tra gli indicatori (es. RSI in ipercomprato ma trend di fondo rialzista).
+          * *Strategia:* Nessuna azione operativa raccomandata. Attendere la rottura dei livelli di congestione.
+        * **Fascia SELL ($S \\le 38.0$):** 
+          * *Condizione:* Confluenza ribassista o ipercomprato critico accompagnato da volumi di distribuzione e sentiment negativo.
+          * *Strategia:* Chiusura delle posizioni long esistenti o valutazione di strategie di copertura/short.
+
+        ### 3. Formule di Volatilità e Gestione del Rischio (ATR & Horizon Scaling)
+        L'ampiezza dello **Stop Loss (SL)** e del **Take Profit (TP)** non è percentuale fissa, ma è calcolata tramite l'**Average True Range (ATR)** a 14 periodi, scalato in base all'orizzonte temporale ($H \\in \\{1\\text{D}, 3\\text{D}, 7\\text{D}\\}$):
+
+        * **Calcolo della True Range (TR):**
+          $$\\text{TR}_t = \\max\\left( \\text{High}_t - \\text{Low}_t, \\; |\\text{High}_t - \\text{Close}_{t-1}|, \\; |\\text{Low}_t - \\text{Close}_{t-1}| \\right)$$
         
-        * **2. Gestione dei Coefficienti Temporali (1D, 3D, 7D):**
-          In base all'orizzonte scelto, il modello scala l'ampiezza di Stop Loss e Take Profit per adattarsi al tempo di esposizione:
-          * **1D (Day Trading):** $\\text{Moltiplicatore ATR} = 1.0$ (Stop stretto per azzerare il rischio overnight).
-          * **3D (Swing Breve):** $\\text{Moltiplicatore ATR} = 1.8$ (Filtra la volatilità di breve periodo).
-          * **7D (Posizionale):** $\\text{Moltiplicatore ATR} = 2.6$ (Ampio respiro per assorbire i ritracciamenti di mercato).
+        * **Calcolo dell'ATR:**
+          $$\\text{ATR}_{14} = \\frac{1}{14} \\sum_{i=0}^{13} \\text{TR}_{t-i}$$
+
+        * **Matrice dei Coefficienti Temporali ($k_h$):**
+          L'orizzonte temporale modifica il fattore moltiplicativo per assorbire la varianza stocastica del prezzo:
+          * $H = 1\\text{D} \\implies k_{1\text{D}} = 1.0$ (Stop stretto, minimizzazione del rischio overnight).
+          * $H = 3\\text{D} \\implies k_{3\text{D}} = 1.8$ (Filtro per oscillazioni di swing breve).
+          * $H = 7\\text{D} \\implies k_{7\text{D}} = 2.6$ (Ampio margine per ammortizzare i cicli di mercato settimanali).
+
+        * **Livelli Operativi Finali:**
+          $$\\text{SL} = \\text{Close}_t - (\\text{ATR}_{14} \\cdot k_h \\cdot \\alpha_{\\text{sl}})$$
+          $$\\text{TP} = \\text{Close}_t + (\\text{ATR}_{14} \\cdot k_h \\cdot \\alpha_{\\text{tp}})$$
+          *(dove $\\alpha_{\\text{sl}} = 1.2$ e $\\alpha_{\\text{tp}} = 2.2$ costituiscono i fattori asimmetrici di risk/reward).*
         """)
