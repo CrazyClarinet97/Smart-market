@@ -17,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# STILE CSS "LIQUID GLASS" UNIVERSALE E PROPORZIONATO
+# STILE CSS "LIQUID GLASS" SEQUENZIALE E PROPORZIONATO
 st.markdown("""
     <style>
     .metric-card {
@@ -43,16 +43,16 @@ st.markdown("""
         align-items: center;
         gap: 8px;
     }
-    .preflight-card {
+    .flow-card {
         background: rgba(15, 23, 42, 0.04);
-        border: 1px solid rgba(150, 150, 150, 0.2);
         border-radius: 10px;
-        padding: 10px 14px;
-        margin-bottom: 14px;
-        font-size: 12px;
+        padding: 12px 16px;
+        margin-bottom: 12px;
+        font-size: 13px;
         display: flex;
         justify-content: space-between;
         align-items: center;
+        border: 1px solid rgba(150, 150, 150, 0.2);
     }
     @media (prefers-color-scheme: dark) {
         .metric-card {
@@ -65,7 +65,7 @@ st.markdown("""
             border: 1px solid rgba(56, 189, 248, 0.2);
             color: #f3f4f6;
         }
-        .preflight-card {
+        .flow-card {
             background: rgba(30, 41, 59, 0.4);
             border: 1px solid rgba(255, 255, 255, 0.1);
             color: #e2e8f0;
@@ -315,6 +315,7 @@ def calcola_modello_ml_e_backtest(df, sentiment_score, horizon):
 st.markdown("<h1>Institutional Market Terminal</h1>", unsafe_allow_html=True)
 st.write("")
 
+# 1. SCELTA TICKER & ORIZZONTE
 c1, c2 = st.columns([2, 1])
 with c1:
     st.session_state.ticker_input = st.text_input("Ticker:", value=st.session_state.ticker_input).upper().strip()
@@ -325,7 +326,7 @@ ticker = st.session_state.ticker_input
 horizon = st.session_state.horizon_input
 
 if ticker:
-    with st.spinner("Esecuzione Pre-Flight Check & Gradient Boosting..."):
+    with st.spinner("Esecuzione Analisi di Mercato & Gradient Boosting..."):
         df = scarica_dati(ticker)
         if df is None or df.empty:
             st.error("Nessun dato trovato per il ticker inserito o formato errato.")
@@ -333,27 +334,16 @@ if ticker:
         
         df = calcola_indicatori(df)
         
-        # PRE-FLIGHT METRICS CON VALORI NUMERICI ESATTI
         avg_vol = df['Volume'].rolling(20).mean().iloc[-1]
         last_price = df['Close'].iloc[-1]
         last_atr = df['ATR'].iloc[-1]
         atr_pct = (last_atr / last_price) * 100
-        
-        # Formattazione valori volume (M = Milioni, K = Migliaia)
         vol_str = f"{avg_vol/1e6:.1f}M" if avg_vol >= 1e6 else f"{avg_vol/1e3:.0f}K"
         
-        # Valutazione stato pre-flight con valori incorporati
-        if avg_vol > 500000:
-            liq_status = f"🟢 Liquidità: {vol_str} (Ottimale)"
-        else:
-            liq_status = f"🔴 Liquidità: {vol_str} (Bassa - Rischio Slippage)"
-
-        if 1.5 <= atr_pct <= 3.5:
-            vol_status = f"🟢 Volatilità (ATR): {atr_pct:.2f}% (Ideale)"
-        elif atr_pct < 1.5:
-            vol_status = f"🟡 Volatilità (ATR): {atr_pct:.2f}% (Bassa/Piatta)"
-        else:
-            vol_status = f"🔴 Volatilità (ATR): {atr_pct:.2f}% (Eccessiva/Rischiosa)"
+        check_liq_ok = avg_vol > 500000
+        check_vol_ok = 1.5 <= atr_pct <= 3.5
+        check_iniziale_passato = check_liq_ok and check_vol_ok
+        check_border_color = "#238636" if check_iniziale_passato else "#da3633"
 
         avg_sentiment, articoli = estrai_news_e_sentiment(ticker)
         prob, verdetto, colore, sl_val, sl_pct, tp_val, tp_pct, risk_reward, win_rate, is_macro_bull, dettagli = calcola_modello_ml_e_backtest(df, avg_sentiment, horizon)
@@ -363,42 +353,76 @@ if ticker:
         sortino_val = df['Sortino'].iloc[-1]
         max_dd = df['Max_DD'].iloc[-1]
 
-    # PRE-FLIGHT CHECK BAR CON VALORI ESATTI
-    st.markdown(f"""
-        <div class="preflight-card">
-            <span>🛡️ <b>Pre-Flight Check:</b></span>
-            <span>{liq_status}</span>
-            <span>|</span>
-            <span>{vol_status}</span>
-        </div>
-    """, unsafe_allow_html=True)
-
-    # BOX DATA & MACRO STATUS
-    macro_status = "🟢 Bullish (Sopra SMA200)" if is_macro_bull else "🔴 Bearish (Sotto SMA200 - Filtro Attivo)"
+    # BOX DATA
     st.markdown(f"""
         <div class="date-card">
             <span>📅</span>
-            <span>Ultima data: <b>{last_date}</b> | Benchmark Peer: <b>{get_dynamic_benchmark(ticker)}</b> | Macro Trend: <b>{macro_status}</b></span>
+            <span>Ultima data: <b>{last_date}</b> | Benchmark Peer: <b>{get_dynamic_benchmark(ticker)}</b></span>
         </div>
     """, unsafe_allow_html=True)
 
-    # SCHEDA VERDETTO ML
+    # 2. BLOCCO CHECK INIZIALE
+    liq_color_badge = "#238636" if check_liq_ok else "#da3633"
+    vol_color_badge = "#238636" if check_vol_ok else ("#d29922" if atr_pct < 1.5 else "#da3633")
+    
+    st.markdown(f"""
+        <div class="flow-card" style="border-left: 5px solid {check_border_color};">
+            <div>
+                <span>🛡️ <b>Check Iniziale:</b> </span>
+                <span style="color: {liq_color_badge}; font-weight: 600;">Liquidità: {vol_str}</span> &nbsp;|&nbsp; 
+                <span style="color: {vol_color_badge}; font-weight: 600;">ATR: {atr_pct:.2f}%</span>
+            </div>
+            <div>
+                <b>Stato:</b> <span style="color: {check_border_color}; font-weight: bold;">{'SUPERATO' if check_iniziale_passato else 'ATTENZIONE / NON IDEALE'}</span>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # 3. BLOCCO MACRO TREND
+    macro_border_color = "#238636" if is_macro_bull else "#da3633"
+    macro_text = "🟢 Bullish (Sopra SMA200 - OK per procedere)" if is_macro_bull else "🔴 Bearish (Sotto SMA200 - Blocco Long Attivo)"
+    st.markdown(f"""
+        <div class="flow-card" style="border-left: 5px solid {macro_border_color};">
+            <div>
+                <span>🌍 <b>Macro Trend Gatekeeper ({get_dynamic_benchmark(ticker)}):</b></span>
+            </div>
+            <div>
+                <span style="color: {macro_border_color}; font-weight: bold;">{macro_text}</span>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # 4. BLOCCO CONFLUENZA QUANTITATIVA
+    conf_ok = prob >= 62.0 and win_rate >= 55.0 and risk_reward >= 1.5
+    conf_border = "#238636" if conf_ok else "#d29922"
+    st.markdown(f"""
+        <div class="flow-card" style="border-left: 5px solid {conf_border};">
+            <div>
+                <span>📊 <b>Confluenza Quantitativa:</b> Prob. Rialzo: <b>{prob:.1f}%</b> | Net Win Rate: <b>{win_rate:.1f}%</b> | R/R Ratio: <b>1:{risk_reward:.1f}</b></span>
+            </div>
+            <div>
+                <b style="color: {conf_border};">{'CONFLUENZA PIENA (OK)' if conf_ok else 'SOTTO SOGLIA OTTIMALE'}</b>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # 5. BLOCCO VERDETTO FINALE
     st.markdown(f"""
         <div class="metric-card" style="border-left: 5px solid {colore};">
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div>
-                    <span class="metric-label">ML Signal ({horizon})</span>
-                    <div style="font-size: 20px; font-weight: 800; color: {colore}; margin-top: 2px;">{verdetto}</div>
+                    <span class="metric-label">Verdetto Operativo ({horizon})</span>
+                    <div style="font-size: 22px; font-weight: 800; color: {colore}; margin-top: 2px;">{verdetto}</div>
                 </div>
                 <div style="text-align: right;">
-                    <span class="metric-label">Probabilità Rialzo (GB) | Net Win Rate: {win_rate:.1f}%</span>
-                    <div style="font-size: 18px; font-weight: bold;">{prob:.1f}%</div>
+                    <span class="metric-label">Score Complessivo</span>
+                    <div style="font-size: 18px; font-weight: bold; color: {colore};">{prob:.1f}%</div>
                 </div>
             </div>
         </div>
     """, unsafe_allow_html=True)
 
-    # KPI RIGHE
+    # 6. BLOCCO VALORI DI PREZZO, STOP LOSS, TAKE PROFIT E PERCENTUALI
     k1, k2, k3, k4 = st.columns(4)
     with k1:
         ch_color = '#238636' if change_pct >= 0 else '#da3633'
@@ -412,29 +436,29 @@ if ticker:
     with k2:
         st.markdown(f"""
             <div class="metric-card">
-                <div class="metric-label">Stop Loss / R/R</div>
+                <div class="metric-label">Stop Loss (ATR)</div>
                 <div class="metric-val" style="color: #da3633;">${sl_val:.2f}</div>
-                <div class="metric-sub" style="color: #38bdf8;">R/R Ratio: 1 : {risk_reward:.1f}</div>
+                <div class="metric-sub" style="color: #da3633;">{sl_pct:+.2f}% dal prezzo</div>
             </div>
         """, unsafe_allow_html=True)
     with k3:
         st.markdown(f"""
             <div class="metric-card">
-                <div class="metric-label">Sortino Ratio</div>
-                <div class="metric-val" style="color: #238636;">{sortino_val:.2f}</div>
-                <div class="metric-sub" style="opacity: 0.7;">Rendimento / Downside Risk</div>
+                <div class="metric-label">Take Profit (Target)</div>
+                <div class="metric-val" style="color: #238636;">${tp_val:.2f}</div>
+                <div class="metric-sub" style="color: #238636;">{tp_pct:+.2f}% dal prezzo</div>
             </div>
         """, unsafe_allow_html=True)
     with k4:
         st.markdown(f"""
             <div class="metric-card">
-                <div class="metric-label">Backtest Net Win Rate</div>
-                <div class="metric-val" style="color: #38bdf8;">{win_rate:.1f}%</div>
-                <div class="metric-sub" style="opacity: 0.7;">Post-Costi & Slippage</div>
+                <div class="metric-label">Rischio / Rendimento</div>
+                <div class="metric-val" style="color: #38bdf8;">1 : {risk_reward:.1f}</div>
+                <div class="metric-sub" style="opacity: 0.7;">Sortino: {sortino_val:.2f}</div>
             </div>
         """, unsafe_allow_html=True)
 
-    # GRAFICO
+    # 7. GRAFICO & INDICATORI
     st.write("")
     st.subheader("Grafico & Indicatori")
     
@@ -516,36 +540,38 @@ if ticker:
     else:
         st.info("Nessuna notizia recente.")
 
-    # GUIDA ACCADEMICA E CAPITOLO PRATICO ESECUTIVO (AGGIORNATO CON VALORI PRE-FLIGHT)
+    # GUIDA ACCADEMICA E CAPITOLO PRATICO ESECUTIVO (MASTERPLAN 200€ & POSITION SIZING)
     st.write("")
-    with st.expander("📖 Guida ai Risultati, Pre-Flight Check e Capitolo Pratico Esecutivo"):
+    with st.expander("📖 Guida ai Risultati, Flusso Operativo e Masterplan 200€/Mese (Position Sizing 1%)"):
         st.markdown(r"""
-        ### 1. Capitolo Pratico: Pre-Flight Check, Selezione Ticker e Protocollo
-        Prima di valutare qualsiasi segnale, il terminale esegue automaticamente il **Pre-Flight Check** mostrando i valori numerici esatti e lo stato di convenienza:
-        * **Filtro di Liquidità (Volume Medio 20D):** Mostra il volume medio giornaliero (es. $15.2\text{M}$ o $350\text{K}$).
-          * 🟢 **Ottimale ($> 500\text{K}$ azioni):** Liquidità alta, esecuzione pulita senza slippage.
-          * 🔴 **Bassa ($\le 500\text{K}$ azioni):** Rischio di scostamento di prezzo all'ordine.
-        * **Filtro di Volatilità (ATR Percentuale sul Prezzo):** Mostra l'escursione percentuale media (es. $2.1\%$).
-          * 🟢 **Ideale ($1.5\% \le \text{ATR}\% \le 3.5\%$):** Range perfetto per lo swing trading mirato.
-          * 🟡 **Bassa / Piatta ($< 1.5\%$):** Movimento insufficiente per il target di profitto mensile.
-          * 🔴 **Eccessiva ($> 3.5\%$):** Rischio di crollo o trigger prematuro dello stop loss.
+        ### 1. Capitolo Pratico: Il Masterplan dei 200€/Mese e Regola dell'1%
+        Per centrare l'obiettivo di guadagno netto costante senza correre rischi sproporzionati, l'operatività segue un rigido protocollo matematico:
 
-        * **Protocollo d'Ingresso (Le 4 Regole d'Oro):**
-          1. *Check Macro:* Il benchmark deve essere 🟢 *Bullish (Sopra SMA200)*.
-          2. *Confluenza Rigida:* Probabilità ML $\ge 62\%$, Net Win Rate $\ge 55\%$ e R/R Ratio $\ge 1.5$.
-          3. *Position Sizing:* Rischio massimo 1-2% del capitale per trade.
-          4. *Disciplina Meccanica:* Esecuzione rigida dello stop loss basato su ATR.
+        * **Regola del Rischio Massimo (1% del Capitale):**
+          In ogni singolo trade, la perdita massima accettata se il prezzo tocca lo Stop Loss non deve **mai superare l'1% del tuo capitale totale**. 
+          * *Esempio con Conto di 2.000€:* Il rischio massimo ammesso per trade è di **20€**.
+        
+        * **Formula per Calcolare quante Azioni Comprare (Position Sizing):**
+          $$\text{Quantità di Azioni} = \frac{\text{Budget di Rischio in Denaro (es. 20€)}}{\text{Distanza in dollari tra Prezzo di Ingresso e Stop Loss (ATR)}}$$
+          * *Esempio pratico:* Compri un titolo a $100$. Il terminale calcola lo Stop Loss a $98$ (distanza di $2$). Rischendo $20€$, compri esattamente **10 azioni** ($20 / 2 = 10$). Se il mercato va contro, perdi esattamente $20€$ e chiudi la posizione in sicurezza.
+
+        * **Flusso Operativo Intraday (`1D`) vs Swing 3 Giorni (`3D`):**
+          * **Strategia 3D (Consigliata):** Apri la posizione verificando che il Check Iniziale sia verde, il Macro Trend sia 🟢 *Bullish (Sopra SMA200)* e la Confluenza Quantitativa sia positiva. Tieni la posizione per 3 giorni o fino al raggiungimento del Take Profit.
+          * **Strategia Intraday (`1D`):** Da usare esclusivamente su titoli ad altissima liquidità (es. Big Tech). Chiudi obbligatoriamente ogni posizione prima della chiusura della sessione per azzerare il rischio overnight.
 
         ---
 
         ### 2. Guida ai KPI e Bande di Valutazione
+        * **Check Iniziale (Liquidità & Volatilità):**
+          * 🟢 **Liquido & Ideale:** Volume $>500\text{K}$ e ATR tra $1.5\%$ e $3.5\%$.
+          * 🔴 **Attenzione:** Volumi bassi o ATR estremi (<1.5% o >3.5%).
+        * **Macro Trend Gatekeeper:** Se sopra la SMA200 (verde), i segnali Long sono autorizzati. Sotto la SMA200 (rosso), blocco di protezione attivo.
         * **ML Signal & Probabilità di Rialzo (Gradient Boosting):**
           * 🟢 **Banda Ottimale per BUY ($P \ge 62\%$):** Alta confidenza statistica out-of-sample.
           * 🟡 **Banda Neutra / HOLD ($38\% < P < 62\%$):** Indecisione stocastica. Nessuna operazione.
           * 🔴 **Banda Critica per SELL ($P \le 38\%$):** Alta probabilità di storno.
         * **Backtest Net Win Rate:** Ottimale se $\ge 55\%$ (al netto dei costi di transazione).
         * **R/R Ratio:** Ottimale se $\ge 1 : 1.5$.
-        * **Sortino Ratio:** Ottimale se $> 1.5$.
 
         ---
 
