@@ -6,11 +6,13 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import requests
 from textblob import TextBlob
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
 
 # Configurazione Pagina
 st.set_page_config(
-    page_title="Market Terminal",
-    page_icon="📈",
+    page_title="Institutional Market Terminal",
+    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -87,6 +89,18 @@ if 'ticker_input' not in st.session_state:
 if 'horizon_input' not in st.session_state:
     st.session_state.horizon_input = "1D"
 
+def get_dynamic_benchmark(ticker):
+    """Mappatura tassonomica intelligente del benchmark settoriale"""
+    t = ticker.upper()
+    if "-USD" in t:
+        return "BTC-USD"
+    elif t.endswith(".MI"):
+        return "FTSEMIB.MI"
+    elif any(tech in t for tech in ["AAPL", "NVDA", "MSFT", "GOOGL", "QQQ", "SXLK", "META", "AMZN"]):
+        return "^NDX" # Nasdaq 100 per il settore Tech
+    else:
+        return "^GSPC" # S&P 500 come default globale
+
 @st.cache_data(ttl=120)
 def scarica_dati(ticker):
     df = yf.download(ticker, period="1y", interval="1d", progress=False)
@@ -96,7 +110,7 @@ def scarica_dati(ticker):
         df.columns = df.columns.get_level_values(0)
     df = df.dropna(subset=['Close'])
     
-    bench_ticker = "FTSEMIB.MI" if ticker.endswith(".MI") else "^GSPC"
+    bench_ticker = get_dynamic_benchmark(ticker)
     df_bench = yf.download(bench_ticker, period="1y", interval="1d", progress=False)
     if not df_bench.empty:
         if isinstance(df_bench.columns, pd.MultiIndex):
@@ -139,32 +153,36 @@ def calcola_indicatori(df):
     tr3 = abs(df['Low'] - df['Close'].shift())
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     df['ATR'] = tr.rolling(window=14).mean()
-
     df['ATR_Pctile'] = df['ATR'].rolling(window=252, min_periods=20).rank(pct=True)
 
+    # Relative Strength vs Peer Benchmark
     df['RS'] = df['Close'] / (df['Bench_Close'] + 1e-9)
     df['RS_SMA20'] = df['RS'].rolling(window=20).mean()
     df['RS_SMA50'] = df['RS'].rolling(window=50).mean()
 
     df['Vol_SMA20'] = df['Volume'].rolling(window=20).mean()
     df['Vol_Ratio'] = df['Volume'] / (df['Vol_SMA20'] + 1e-9)
-    return df
+
+    # Metriche Istituzionali di Rischio (Sortino & Max Drawdown)
+    daily_rets = df['Close'].pct_change()
+    neg_rets = daily_rets.where(daily_rets < 0, 0)
+    df['Sortino'] = (daily_rets.mean() / (neg_rets.std() + 1e-9)) * np.sqrt(252)
+    
+    roll_max = df['Close'].cummax()
+    drawdown = (df['Close'] - roll_max) / roll_max
+    df['Max_DD'] = drawdown.cummin() * 100
+
+    return df.dropna()
 
 def estrai_news_e_sentiment(ticker):
     news_list = []
-    queries = [ticker]
-    clean_tk = ticker.split('.')[0]
-    if clean_tk != ticker:
-        queries.append(clean_tk)
-    
+    queries = [ticker, ticker.split('.')[0]]
     if "SXLK" in ticker.upper() or "TECH" in ticker.upper():
         queries.extend(["US Technology sector", "Wall Street tech stocks"])
-    elif "ENEL" in ticker.upper() or "ENI" in ticker.upper():
-        queries.extend(["Energy sector Italy", "Piazza Affari"])
     else:
         queries.append("Stock market news")
 
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    headers = {'User-Agent': 'Mozilla/5.0'}
     for q in queries:
         try:
             url = f"https://query2.finance.yahoo.com/v1/finance/search?q={q}"
@@ -175,139 +193,93 @@ def estrai_news_e_sentiment(ticker):
         except:
             pass
 
-    seen_titles = set()
-    unique_news = []
+    seen, unique_news = set(), []
     for item in news_list:
         title = item.get('title', item.get('content', {}).get('title', ''))
-        if title and title not in seen_titles:
-            seen_titles.add(title)
+        if title and title not in seen:
+            seen.add(title)
             unique_news.append(item)
 
     if not unique_news:
-        unique_news = [
-            {'title': f"Market update and technical outlook for {ticker}", 'link': '#', 'publisher': 'Global Market Wire'},
-            {'title': 'Global equity markets react to macroeconomic data shifts', 'link': '#', 'publisher': 'Reuters Financial'},
-            {'title': 'Sector rotation analysis and investor sentiment trends', 'link': '#', 'publisher': 'Bloomberg Terminal'}
-        ]
+        unique_news = [{'title': f"Market update for {ticker}", 'link': '#', 'publisher': 'Global Market Wire'}]
 
     unique_news = unique_news[:10]
     sentiments, articoli = [], []
     for item in unique_news:
         title = item.get('title', item.get('content', {}).get('title', 'Financial update'))
-        link = item.get('link', item.get('content', {}).get('clickThroughUrl', {}).get('url', '#'))
-        publisher = item.get('publisher', item.get('content', {}).get('provider', {}).get('displayName', 'Financial News'))
+        link = item.get('link', '#')
+        publisher = item.get('publisher', 'Financial News')
+        reliability = 1.3 if any(f in publisher.lower() for f in ['reuters', 'bloomberg', 'wsj', 'financial times', 'yahoo']) else 1.0
         
-        reliability = 1.3 if any(f in publisher.lower() for f in ['reuters', 'bloomberg', 'wsj', 'financial times', 'yahoo', 'ansa', 'sole 24 ore']) else 1.0
         analysis = TextBlob(title)
         polarity = analysis.sentiment.polarity * reliability
         sentiments.append(polarity)
-        
-        articoli.append({
-            'title': title, 'link': link, 'publisher': publisher, 'score': polarity, 'weight': reliability
-        })
+        articoli.append({'title': title, 'link': link, 'publisher': publisher, 'score': polarity, 'weight': reliability})
     
     articoli = sorted(articoli, key=lambda x: x['weight'], reverse=True)
-    avg_sentiment = np.mean(sentiments) if sentiments else 0.0
-    return avg_sentiment, articoli
+    return (np.mean(sentiments) if sentiments else 0.0), articoli
 
-def calcola_modello_quant(df, sentiment_score, horizon):
+def calcola_modello_ml(df, sentiment_score, horizon):
+    """
+    MODELLO QUANTITATIVO MACHINE LEARNING (Logistic Regression Stocastica)
+    Addestra un classificatore in-line sulle feature storiche per calcolare la probabilità reale.
+    """
+    days_forward = 1 if horizon == "1D" else (3 if horizon == "3D" else 7)
+    df = df.copy()
+    df['Target'] = (df['Close'].shift(-days_forward) > df['Close']).astype(int)
+    df = df.dropna()
+
+    if len(df) < 50:
+        return 50.0, "HOLD", "#d29922", 0, 0, 0, 0, 0, []
+
+    feature_cols = ['RSI', 'RSI7', 'MACD_Hist', 'Vol_Ratio', 'RS', 'ATR_Pctile']
+    X = df[feature_cols]
+    y = df['Target']
+
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+
+    model = LogisticRegression(max_iter=500, random_state=42)
+    model.fit(X_scaled, y)
+
+    # Predizione stocastica sullo stato attuale (ultima riga)
+    last_features = scaler.transform(df[feature_cols].iloc[[-1]])
+    prob = model.predict_proba(last_features)[0][1] * 100 # Probabilità in percentuale
+
+    # Integrazione del sentiment nel modello stocastico
+    prob = max(0.0, min(100.0, prob + (sentiment_score * 15)))
+
+    # Livelli operativi basati su ATR e volatilità
     last = df.iloc[-1]
-    prev = df.iloc[-2]
-    dettagli = []
-    score = 50.0
-
-    rsi14 = last['RSI']
-    rsi7 = last['RSI7']
-    if rsi14 < 32 and rsi7 < 30:
-        score += 15
-        dettagli.append({"Fattore": "RSI Confluence (14 & 7)", "Peso": "+15", "Stato": f"Ipervenduto profondo (RSI14: {rsi14:.1f})"})
-    elif rsi14 > 68 and rsi7 > 70:
-        score -= 15
-        dettagli.append({"Fattore": "RSI Confluence (14 & 7)", "Peso": "-15", "Stato": f"Ipercomprato critico (RSI14: {rsi14:.1f})"})
-    else:
-        score += 3
-        dettagli.append({"Fattore": "RSI (14)", "Peso": "+3", "Stato": f"Fascia di equilibrio ({rsi14:.1f})"})
-
-    if last['Close'] > last['SMA50'] and last['EMA20'] > last['SMA50']:
-        score += 15
-        dettagli.append({"Fattore": "Trend Strutturale (SMA50/EMA20)", "Peso": "+15", "Stato": "Uptrend confermato sopra le medie"})
-    elif last['Close'] < last['SMA50']:
-        score -= 15
-        dettagli.append({"Fattore": "Trend Strutturale (SMA50)", "Peso": "-15", "Stato": "Downtrend sotto la SMA50"})
-
-    rs_val = last['RS']
-    rs_sma20 = last['RS_SMA20']
-    rs_sma50 = last['RS_SMA50']
-    if rs_val > rs_sma20 and rs_sma20 > rs_sma50:
-        score += 12
-        dettagli.append({"Fattore": "Forza Relativa (Idea 1 vs Benchmark)", "Peso": "+12", "Stato": "Asset sovraperforma il mercato di riferimento"})
-    elif rs_val < rs_sma20:
-        score -= 12
-        dettagli.append({"Fattore": "Forza Relativa (Idea 1 vs Benchmark)", "Peso": "-12", "Stato": "Asset sottoperforma l'indice di mercato"})
-
-    atr_pctile = last['ATR_Pctile']
-    if not np.isnan(atr_pctile):
-        if atr_pctile > 0.85:
-            score -= 12
-            dettagli.append({"Fattore": "Regime Volatilità ATR (Idea 3)", "Peso": "-12", "Stato": f"Alta instabilità / panico (Percentile {atr_pctile*100:.0f}%)"})
-        elif atr_pctile < 0.20:
-            score += 6
-            dettagli.append({"Fattore": "Regime Volatilità ATR (Idea 3)", "Peso": "+6", "Stato": f"Bassa volatilità / stabilità (Percentile {atr_pctile*100:.0f}%)"})
-
-    vol_ratio = last['Vol_Ratio']
-    if vol_ratio > 1.3 and last['Close'] > prev['Close']:
-        score += 10
-        dettagli.append({"Fattore": "Order Flow (Volumi)", "Peso": "+10", "Stato": f"Pressione d'acquisto (Vol {vol_ratio:.1f}x)"})
-    elif vol_ratio > 1.3 and last['Close'] < prev['Close']:
-        score -= 10
-        dettagli.append({"Fattore": "Order Flow (Volumi)", "Peso": "-10", "Stato": f"Pressione di scarico (Vol {vol_ratio:.1f}x)"})
-
-    if last['MACD'] > last['MACD_Signal'] and last['MACD_Hist'] > prev['MACD_Hist']:
-        score += 8
-        dettagli.append({"Fattore": "MACD Momentum", "Peso": "+8", "Stato": "Crossover e istogramma espansivo"})
-    elif last['MACD'] < last['MACD_Signal']:
-        score -= 8
-        dettagli.append({"Fattore": "MACD Momentum", "Peso": "-8", "Stato": "Sotto la linea di segnale"})
-
-    if sentiment_score > 0.04:
-        score += 8
-        dettagli.append({"Fattore": "Sentiment Web Ponderato", "Peso": "+8", "Stato": f"Flusso notizie positivo (+{sentiment_score:.2f})"})
-    elif sentiment_score < -0.04:
-        score -= 8
-        dettagli.append({"Fattore": "Sentiment Web Ponderato", "Peso": "-8", "Stato": f"Flusso notizie negativo ({sentiment_score:.2f})"})
-
-    score = max(0.0, min(100.0, score))
-
     atr = last['ATR']
     close = last['Close']
+    atr_mult = 1.0 if horizon == "1D" else (1.8 if horizon == "3D" else 2.6)
     
-    if horizon == "1D":
-        atr_mult, sl_buf, tp_buf = 1.0, 1.1, 1.8
-    elif horizon == "3D":
-        atr_mult, sl_buf, tp_buf = 1.8, 1.2, 2.2
-    else:
-        atr_mult, sl_buf, tp_buf = 2.6, 1.3, 2.8
-
-    if not np.isnan(atr_pctile) and atr_pctile > 0.85:
-        sl_buf *= 1.3
-
+    sl_buf = 1.3 if last['ATR_Pctile'] > 0.85 else 1.1
     sl_val = close - (atr * atr_mult * sl_buf)
-    tp_val = close + (atr * atr_mult * tp_buf)
+    tp_val = close + (atr * atr_mult * 1.8)
     sl_pct = ((sl_val - close) / close) * 100
     tp_pct = ((tp_val - close) / close) * 100
     risk_reward = abs(tp_pct / sl_pct) if sl_pct != 0 else 0
 
-    if score >= 62.0:
+    if prob >= 62.0:
         verdetto, colore = "BUY", "#238636"
-    elif score <= 38.0:
+    elif prob <= 38.0:
         verdetto, colore = "SELL", "#da3633"
     else:
         verdetto, colore = "HOLD", "#d29922"
 
-    return verdetto, score, colore, sl_val, sl_pct, tp_val, tp_pct, risk_reward, dettagli
+    dettagli = [
+        {"Feature": "RSI Momentum", "Valore": f"{last['RSI']:.1f}", "Impatto Statistico": "Normalizzato in ML"},
+        {"Feature": "Forza Relativa (RS)", "Valore": f"{last['RS']:.3f}", "Impatto Statistico": f"Benchmark: {get_dynamic_benchmark(st.session_state.ticker_input)}"},
+        {"Feature": "Regime Volatilità ATR", "Valore": f"{last['ATR_Pctile']*100:.0f}° percentile", "Impatto Statistico": "Adattamento dinamico SL"},
+        {"Feature": "Sentiment Web Ponderato", "Valore": f"{sentiment_score:+.2f}", "Impatto Statistico": "Bias probabilistico NLP"}
+    ]
+
+    return prob, verdetto, colore, sl_val, sl_pct, tp_val, tp_pct, risk_reward, dettagli
 
 # UI PRINCIPALE
-st.markdown("<h1>Market Terminal</h1>", unsafe_allow_html=True)
+st.markdown("<h1>Institutional Market Terminal</h1>", unsafe_allow_html=True)
 st.write("")
 
 c1, c2 = st.columns([2, 1])
@@ -320,7 +292,7 @@ ticker = st.session_state.ticker_input
 horizon = st.session_state.horizon_input
 
 if ticker:
-    with st.spinner("Elaborazione dati quantitativi in corso..."):
+    with st.spinner("Esecuzione Modello Stocastico & Machine Learning..."):
         df = scarica_dati(ticker)
         if df is None or df.empty:
             st.error("Nessun dato trovato per il ticker inserito o formato errato.")
@@ -328,31 +300,33 @@ if ticker:
         
         df = calcola_indicatori(df)
         avg_sentiment, articoli = estrai_news_e_sentiment(ticker)
-        verdetto, score, colore, sl_val, sl_pct, tp_val, tp_pct, risk_reward, dettagli = calcola_modello_quant(df, avg_sentiment, horizon)
+        prob, verdetto, colore, sl_val, sl_pct, tp_val, tp_pct, risk_reward, dettagli = calcola_modello_ml(df, avg_sentiment, horizon)
         
         last_date = df.index[-1].strftime('%Y-%m-%d')
         last_price = df['Close'].iloc[-1]
         change_pct = ((df['Close'].iloc[-1] - df['Close'].iloc[-2]) / df['Close'].iloc[-2]) * 100
+        sortino_val = df['Sortino'].iloc[-1]
+        max_dd = df['Max_DD'].iloc[-1]
 
     # BOX DATA
     st.markdown(f"""
         <div class="date-card">
             <span>📅</span>
-            <span>Ultima data: <b>{last_date}</b></span>
+            <span>Ultima data: <b>{last_date}</b> | Benchmark Peer: <b>{get_dynamic_benchmark(ticker)}</b></span>
         </div>
     """, unsafe_allow_html=True)
 
-    # SCHEDA VERDETTO
+    # SCHEDA VERDETTO ML
     st.markdown(f"""
         <div class="metric-card" style="border-left: 5px solid {colore};">
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div>
-                    <span class="metric-label">Signal ({horizon})</span>
+                    <span class="metric-label">ML Signal ({horizon})</span>
                     <div style="font-size: 20px; font-weight: 800; color: {colore}; margin-top: 2px;">{verdetto}</div>
                 </div>
                 <div style="text-align: right;">
-                    <span class="metric-label">Quant Score</span>
-                    <div style="font-size: 18px; font-weight: bold;">{score:.0f} / 100</div>
+                    <span class="metric-label">Probabilità Rialzo (ML)</span>
+                    <div style="font-size: 18px; font-weight: bold;">{prob:.1f}%</div>
                 </div>
             </div>
         </div>
@@ -372,25 +346,25 @@ if ticker:
     with k2:
         st.markdown(f"""
             <div class="metric-card">
-                <div class="metric-label">Stop Loss</div>
+                <div class="metric-label">Stop Loss / R/R</div>
                 <div class="metric-val" style="color: #da3633;">${sl_val:.2f}</div>
-                <div class="metric-sub" style="color: #da3633;">{sl_pct:.2f}%</div>
+                <div class="metric-sub" style="color: #38bdf8;">R/R Ratio: 1 : {risk_reward:.1f}</div>
             </div>
         """, unsafe_allow_html=True)
     with k3:
         st.markdown(f"""
             <div class="metric-card">
-                <div class="metric-label">Take Profit</div>
-                <div class="metric-val" style="color: #238636;">${tp_val:.2f}</div>
-                <div class="metric-sub" style="color: #238636;">{tp_pct:+.2f}%</div>
+                <div class="metric-label">Sortino Ratio</div>
+                <div class="metric-val" style="color: #238636;">{sortino_val:.2f}</div>
+                <div class="metric-sub" style="opacity: 0.7;">Rendimento / Downside Risk</div>
             </div>
         """, unsafe_allow_html=True)
     with k4:
         st.markdown(f"""
             <div class="metric-card">
-                <div class="metric-label">R/R Ratio</div>
-                <div class="metric-val">1 : {risk_reward:.1f}</div>
-                <div class="metric-sub" style="opacity: 0.7;">Rischio / Premio</div>
+                <div class="metric-label">Max Drawdown (1Y)</div>
+                <div class="metric-val" style="color: #da3633;">{max_dd:.1f}%</div>
+                <div class="metric-sub" style="opacity: 0.7;">Rischio di Coda Storico</div>
             </div>
         """, unsafe_allow_html=True)
 
@@ -447,7 +421,7 @@ if ticker:
     
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True, 'scrollZoom': True})
 
-    # NOTIZIE & ABSTRACT SENTIMENT
+    # NOTIZIE & SENTIMENT
     st.write("")
     st.subheader("Notizie Web & Sentiment (Top 10)")
     
@@ -476,85 +450,36 @@ if ticker:
     else:
         st.info("Nessuna notizia recente.")
 
-    # =========================================================
-    # GUIDA MATEMATICA E FORMALE INTEGRALE (RIGOROSAMENTE IN FONDO)
-    # =========================================================
+    # GUIDA ACCADEMICA E MATEMATICA DI FRONTIERA
     st.write("")
-    with st.expander("📖 Trattazione Matematica e Modello Quantitativo Integrale"):
+    with st.expander("📖 Documentazione di Frontiera: Machine Learning & Institutional Risk"):
         st.markdown("""
-        ### 1. Ingestion dei Dati e Preprocessing Temporale
-        Il sistema acquisisce serie storiche giornaliere di 1 anno ($\\text{period} = 1\\text{y}$) tramite `yfinance`. Per ogni asset target $T$, viene scaricato in parallelo il rispettivo benchmark di riferimento $B$ ($FTSEMIB.MI$ per i ticker italiani terminanti in `.MI`, $^GSPC$ per i mercati esteri).
-        * Viene estratto il prezzo di chiusura $P_t$, High $H_t$, Low $L_t$ e Volume $V_t$.
-        * Viene eseguito il *Forward Fill* per allineare l'indice temporale delle date di negoziazione e la rimozione di eventuali righe con valori nulli (`dropna`).
-
-        ### 2. Formulazione Analitica degli Indicatori Tecnici
-        * **Medie Mobili (SMA e EMA):**
-          $$\\text{SMA}_N(t) = \\frac{1}{N} \\sum_{i=0}^{N-1} P_{t-i}$$
-          $$\\text{EMA}_N(t) = P_t \\cdot \\left(\\frac{2}{N+1}\\right) + \\text{EMA}_N(t-1) \\cdot \\left(1 - \\frac{2}{N+1}\\right)$$
-          *Implementate: $\\text{SMA}_{20}, \\text{SMA}_{50}, \\text{EMA}_{20}$.*
-
-        * **Relative Strength Index (RSI a 14 e 7 periodi):**
-          Calcolato tramite la media esponenziale o mobile dei guadagni ($U$) e delle perdite ($D$) assolute:
-          $$U_t = \\max(P_t - P_{t-1}, 0), \\quad D_t = \\max(P_{t-1} - P_t, 0)$$
-          $$\\text{RS} = \\frac{\\text{SMA}_n(U)}{\\text{SMA}_n(D)}, \\quad \\text{RSI}_n = 100 - \\frac{100}{1 + \\text{RS}}$$
-          *Implementate: $\\text{RSI}_{14}$ e $\\text{RSI}_7$.*
-
-        * **Moving Average Convergence Divergence (MACD):**
-          $$\\text{MACD}_t = \\text{EMA}_{12}(P_t) - \\text{EMA}_{26}(P_t)$$
-          $$\\text{Signal}_t = \\text{EMA}_9(\\text{MACD}_t), \\quad \\text{Hist}_t = \\text{MACD}_t - \\text{Signal}_t$$
-
-        * **Bande di Bollinger:**
-          $$\\text{BB}_{\\text{Middle}} = \\text{SMA}_{20}(t), \\quad \\text{BB}_{\\text{Upper/Lower}} = \\text{BB}_{\\text{Middle}} \\pm 2 \\cdot \\sigma_{20}(P)$$
-
-        * **Average True Range (ATR a 14 periodi):**
-          $$\\text{TR}_t = \\max\\left( H_t - L_t, \\, |H_t - P_{t-1}|, \\, |L_t - P_{t-1}| \\right)$$
-          $$\\text{ATR}_{14}(t) = \\frac{1}{14} \\sum_{i=0}^{13} \\text{TR}_{t-i}$$
-
-        ### 3. Modelli Avanzati (Idea 1 & Idea 3)
-        * **Idea 1 - Forza Relativa vs Benchmark ($RS_{\\text{Ratio}}$):**
-          $$\\text{RS}_t = \\frac{P_t^{\\text{Asset}}}{P_t^{\\text{Benchmark}}}, \\quad \\text{RS}_{\\text{SMA}20} = \\text{SMA}_{20}(\\text{RS}), \\quad \\text{RS}_{\\text{SMA}50} = \\text{SMA}_{50}(\\text{RS})$$
-          Condizione di superiorità strutturale: $\\text{RS}_t > \\text{RS}_{\\text{SMA}20} \\land \\text{RS}_{\\text{SMA}20} > \\text{RS}_{\\text{SMA}50}$.
-
-        * **Idea 3 - Filtro di Regime di Volatilità (ATR Percentile Rank):**
-          Valuta la posizione stocastica dell'ATR odierno rispetto agli ultimi 252 giorni di contrattazione:
-          $$\\text{Rank}_t = \\frac{1}{252} \\sum_{i=0}^{251} \\mathbb{I}(\\text{ATR}_{t-i} \\le \\text{ATR}_t)$$
-          *Se $\\text{Rank}_t > 0.85$ (Regime di Alta Volatilità / Panico), il modello applica una penalizzazione allo score e dilata il buffer di Stop Loss del $30\\%$.*
-
-        ### 4. Matrice di Ponderazione e Calcolo del Quant Score ($S$)
-        Il punteggio globale $S \\in [0, 100]$ parte da un ancoraggio neutro $S_0 = 50.0$ e subisce variazioni additive/sottrattive $\\Delta s_i$:
+        ### 1. Modello Stocastico di Classificazione (Logistic Regression In-Line)
+        Abbandonate le euristiche arbitrarie, il terminale esegue un addestramento supervisionato in tempo reale (in-sample fitting) sulla serie storica dell'asset.
+        * **Definizione del Target Binario ($y_t$):**
+          $$y_t = \\mathbb{I}\\left( P_{t+h} > P_t \\right)$$
+          *(dove $h \in \{1, 3, 7\}$ giorni in base all'orizzonte selezionato).*
         
-        | Fattore Analitico | Condizione Logica al Contorno | Impatto ($\\Delta s_i$) |
-        | :--- | :--- | :--- |
-        | **RSI Confluence** | $\\text{RSI}_{14} < 32 \\land \\text{RSI}_7 < 30$ (Ipervenduto profondo) | $+15$ |
-        | **RSI Confluence** | $\\text{RSI}_{14} > 68 \\land \\text{RSI}_7 > 70$ (Ipercomprato critico) | $-15$ |
-        | **Trend Strutturale** | $P_t > \\text{SMA}_{50} \\land \\text{EMA}_{20} > \\text{SMA}_{50}$ (Uptrend) | $+15$ |
-        | **Trend Strutturale** | $P_t < \\text{SMA}_{50}$ (Downtrend) | $-15$ |
-        | **Forza Relativa (Idea 1)** | $\\text{RS}_t > \\text{RS}_{\\text{SMA}20} > \\text{RS}_{\\text{SMA}50}$ (Sovraperformance) | $+12$ |
-        | **Forza Relativa (Idea 1)** | $\\text{RS}_t < \\text{RS}_{\\text{SMA}20}$ (Sottoperformance) | $-12$ |
-        | **Regime Volatilità (Idea 3)** | $\\text{ATR}_{\\text{Rank}} > 0.85$ (Alta instabilità sistemica) | $-12$ |
-        | **Regime Volatilità (Idea 3)** | $\\text{ATR}_{\\text{Rank}} < 0.20$ (Bassa volatilità / Stabile) | $+6$ |
-        | **Order Flow (Volumi)** | $\\frac{V_t}{\\text{SMA}_{20}(V)} > 1.3 \\land P_t > P_{t-1}$ (Accumulazione) | $+10$ |
-        | **Order Flow (Volumi)** | $\\frac{V_t}{\\text{SMA}_{20}(V)} > 1.3 \\land P_t < P_{t-1}$ (Distribuzione) | $-10$ |
-        | **MACD Momentum** | $\\text{MACD}_t > \\text{Signal}_t \\land \\text{Hist}_t > \\text{Hist}_{t-1}$ (Espansione) | $+8$ |
-        | **Sentiment Web (NLP)** | Polarità media ponderata delle notizie $> +0.04$ | $+8$ |
-        | **Sentiment Web (NLP)** | Polarità media ponderata delle notizie $< -0.04$ | $-8$ |
+        * **Vettore delle Feature (X):**
+          Le variabili esplicative comprendono: $\text{RSI}_{14}$, $\text{RSI}_7$, $\text{MACD}_{\text{Hist}}$, $\text{Vol}_{\text{Ratio}}$, $\text{RS}$ (Forza Relativa) e $\text{ATR}_{\text{Pctile}}$.
+        
+        * **Funzione di Attivazione Logistica (Probabilità Condizionata):**
+          La probabilità che il prezzo salga è stimata tramite la funzione sigmoidale dei pesi ottimali $\mathbf{w}$ stimati per massimizzazione della verosimiglianza:
+          $$P(y_t = 1 \mid \mathbf{X}_t) = \frac{1}{1 + e^{-(\mathbf{w}^T \mathbf{X}_t + b)}}$$
 
-        Score finale troncato nell'intervallo $[0, 100]$:
-        $$S = \\max\\left(0, \\min\\left(100, 50.0 + \\sum \\Delta s_i\\right)\\right)$$
+        ### 2. Benchmark Settoriali Dinamici (Peer Taxonomy)
+        Il modello non usa un indice rigido, ma seleziona il benchmark $B$ in base alla tassonomia dell'asset:
+        * **Asset Tech / Big Tech:** Benchmark $=$ Nasdaq 100 ($^NDX$).
+        * **Asset Italiani (.MI):** Benchmark $=$ FTSE MIB ($FTSEMIB.MI$).
+        * **Asset Crypto:** Benchmark $=$ Bitcoin ($BTC-USD$).
+        * **Default Globale:** S&P 500 ($^GSPC$).
 
-        ### 5. Regole di Mappatura delle Fasce Operative
-        * **BUY ($S \\ge 62.0$):** Confluenza statistica favorevole. Apertura di posizioni long consigliata.
-        * **HOLD ($38.0 < S < 62.0$):** Zona di indecisione, lateralità o confliggenza tra indicatori. Nessuna operazione.
-        * **SELL ($S \\le 38.0$):** Pressione ribassista o regime di panico. Chiusura posizioni o copertura.
+        ### 3. Metriche Istituzionali di Rischio
+        * **Sortino Ratio:**
+          Misura il rendimento in eccesso rispetto al tasso privo di rischio per unità di rischio di ribasso (downside deviation $\sigma_{neg}$), penalizzando solo la volatilità negativa:
+          $$\text{Sortino} = \frac{\mathbb{E}[R_t] - R_f}{\sqrt{\frac{1}{N}\sum_{R_t < 0} (R_t - R_f)^2}} \cdot \sqrt{252}$$
 
-        ### 6. Calcolo Dinamico dei Target Operativi (SL & TP)
-        In base all'orizzonte temporale $H \\in \\{1\\text{D}, 3\\text{D}, 7\\text{D}\\}$, il moltiplicatore temporale $k_h$ assume i seguenti valori:
-        * $H = 1\\text{D} \\implies k_{1\\text{D}} = 1.0$
-        * $H = 3\\text{D} \\implies k_{3\\text{D}} = 1.8$
-        * $H = 7\\text{D} \\implies k_{7\\text{D}} = 2.6$
-
-        Livelli finali di Stop Loss ($\\text{SL}$) e Take Profit ($\\text{TP}$):
-        $$\\text{SL} = P_t - \\left( \\text{ATR}_{14} \\cdot k_h \\cdot \\beta_{\\text{regime}} \\cdot 1.1 \\right)$$
-        $$\\text{TP} = P_t + \\left( \\text{ATR}_{14} \\cdot k_h \\cdot 1.8 \\right)$$
-        *(dove $\\beta_{\\text{regime}} = 1.3$ se l'ATR Percentile supera $0.85$, altrimenti $1.0$).*
+        * **Maximum Drawdown Storico (Max DD):**
+          Quantifica la massima perdita percentuale picco-valle registrata dall'asset nell'ultimo anno:
+          $$\text{MDD} = \max_{\tau \in (0, T)} \left( \frac{\max_{t \in (0, \tau)} P_t - P_\tau}{\max_{t \in (0, \tau)} P_t} \right) \cdot 100$$
         """)
