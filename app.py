@@ -430,14 +430,14 @@ if ticker:
         </div>
     """, unsafe_allow_html=True)
 
-    # 6. BLOCCO VALORI DI PREZZO, STOP LOSS, TAKE PROFIT E PERCENTUALI
+    # 6. BLOCCO VALORI DI PREZZO, STOP LOSS, TAKE PROFIT E PERCENTUALI (Valori in Euro)
     k1, k2, k3, k4 = st.columns(4)
     with k1:
         ch_color = '#238636' if change_pct >= 0 else '#da3633'
         st.markdown(f"""
             <div class="metric-card">
                 <div class="metric-label">Prezzo Attuale</div>
-                <div class="metric-val">${last_price:.2f}</div>
+                <div class="metric-val">€{last_price:.2f}</div>
                 <div class="metric-sub" style="color: {ch_color};">{change_pct:+.2f}% oggi</div>
             </div>
         """, unsafe_allow_html=True)
@@ -445,7 +445,7 @@ if ticker:
         st.markdown(f"""
             <div class="metric-card">
                 <div class="metric-label">Stop Loss (ATR)</div>
-                <div class="metric-val" style="color: #da3633;">${sl_val:.2f}</div>
+                <div class="metric-val" style="color: #da3633;">€{sl_val:.2f}</div>
                 <div class="metric-sub" style="color: #da3633;">{sl_pct:+.2f}% dal prezzo</div>
             </div>
         """, unsafe_allow_html=True)
@@ -453,7 +453,7 @@ if ticker:
         st.markdown(f"""
             <div class="metric-card">
                 <div class="metric-label">Take Profit (Target)</div>
-                <div class="metric-val" style="color: #238636;">${tp_val:.2f}</div>
+                <div class="metric-val" style="color: #238636;">€{tp_val:.2f}</div>
                 <div class="metric-sub" style="color: #238636;">{tp_pct:+.2f}% dal prezzo</div>
             </div>
         """, unsafe_allow_html=True)
@@ -466,15 +466,15 @@ if ticker:
             </div>
         """, unsafe_allow_html=True)
 
-    # 7. BLOCCO SIMULAZIONE POSITION SIZING & GESTIONE TRADE (SUBITO DOPO I PREZZI, PRIMA DEL GRAFICO)
+    # 7. BLOCCO SIMULAZIONE POSITION SIZING & GESTIONE TRADE (CON INPUT NUMERICI IN EURO)
     st.write("")
-    st.markdown("### ⚙️ Simulatore di Posizione & Rischio (Position Sizing)")
+    st.markdown("### ⚙️ Simulatore di Posizione & Rischio (Valori in Euro)")
     
     col_s1, col_s2 = st.columns(2)
     with col_s1:
-        user_budget = st.number_input("Budget Capitale (€ / $):", min_value=100.0, max_value=100000.0, value=2000.0, step=100.0)
+        user_budget = st.number_input("Budget Capitale (€):", min_value=100.0, max_value=100000.0, value=2000.0, step=100.0)
     with col_s2:
-        user_risk_pct = st.slider("Massima Perdita su Stop Loss (%):", min_value=0.5, max_value=5.0, value=1.0, step=0.5)
+        user_risk_pct = st.number_input("Massima Perdita su Stop Loss (%):", min_value=0.1, max_value=10.0, value=1.0, step=0.1)
 
     # Calcoli matematici simulatore
     max_loss_allowed = user_budget * (user_risk_pct / 100.0)
@@ -486,16 +486,19 @@ if ticker:
         recommended_shares = 0
         
     position_total_value = recommended_shares * last_price
+    stop_loss_eur_actual = recommended_shares * price_distance_sl
+    
     price_distance_tp = abs(tp_val - last_price)
-    expected_profit = recommended_shares * price_distance_tp
+    expected_profit_eur = recommended_shares * price_distance_tp
 
     st.markdown(f"""
         <div class="flow-card" style="border-left: 5px solid #0284c7; margin-top: 10px;">
             <div>
-                <div style="font-weight: 700; margin-bottom: 4px; color: #0284c7;">🎯 Risultato Simulazione Trade</div>
-                <div style="font-weight: 500;">• Massima Perdita Ammessa: <b>-${max_loss_allowed:.2f}</b></div>
-                <div style="font-weight: 500;">• Quantità Consigliata: <b style="color: #38bdf8;">{recommended_shares} Azioni</b> (Valore Posizione: ${position_total_value:.2f})</div>
-                <div style="font-weight: 500;">• Profitto Previsto a TP: <b style="color: #238636;">+${expected_profit:.2f}</b></div>
+                <div style="font-weight: 700; margin-bottom: 4px; color: #0284c7;">🎯 Risultato Simulazione Operazione</div>
+                <div style="font-weight: 500; margin-bottom: 2px;">• Azioni da comprare: <b style="color: #38bdf8;">{recommended_shares} unità</b></div>
+                <div style="font-weight: 500; margin-bottom: 2px;">• Capitale da investire: <b>€{position_total_value:,.2f}</b></div>
+                <div style="font-weight: 500; margin-bottom: 2px;">• Stop Loss: <b>{sl_pct:+.2f}%</b> (Valore rischio: <b style="color: #da3633;">-€{stop_loss_eur_actual:,.2f}</b>, pari al {user_risk_pct}% del capitale)</div>
+                <div style="font-weight: 500;">• Take Profit: <b>{tp_pct:+.2f}%</b> (Valore profitto: <b style="color: #238636;">+€{expected_profit_eur:,.2f}</b>)</div>
             </div>
             <div style="text-align: right;">
                 <span style="font-size: 10px; opacity: 0.7; text-transform: uppercase; display: block; margin-bottom: 2px;">Rischio / Premio</span>
@@ -598,8 +601,8 @@ if ticker:
           * *Esempio con Conto di 2.000€:* Il rischio massimo ammesso per trade è di **20€**.
         
         * **Formula per Calcolare quante Azioni Comprare (Position Sizing):**
-          $$\text{Quantità di Azioni} = \frac{\text{Budget di Rischio in Denaro (es. 20€)}}{\text{Distanza in dollari tra Prezzo di Ingresso e Stop Loss (ATR)}}$$
-          * *Esempio pratico:* Compri un titolo a $100$. Il terminale calcola lo Stop Loss a $98$ (distanza di $2$). Rischendo $20€$, compri esattamente **10 azioni** ($20 / 2 = 10$). Se il mercato va contro, perdi esattamente $20€$ e chiudi la posizione in sicurezza.
+          $$\text{Quantità di Azioni} = \frac{\text{Budget di Rischio in Denaro (es. 20€)}}{\text{Distanza in euro tra Prezzo di Ingresso e Stop Loss (ATR)}}$$
+          * *Esempio pratico:* Compri un titolo a €100. Il terminale calcola lo Stop Loss a €98 (distanza di €2). Rischendo €20, compri esattamente **10 azioni** (€20 / €2 = 10). Se il mercato va contro, perdi esattamente €20 e chiudi la posizione in sicurezza.
 
         * **Flusso Operativo Intraday (`1D`) vs Swing 3 Giorni (`3D`):**
           * **Strategia 3D (Consigliata):** Apri la posizione verificando che il Check Iniziale sia verde, il Macro Trend sia 🟢 *Bullish (Sopra SMA200)* e la Confluenza Quantitativa sia positiva. Tieni la posizione per 3 giorni o fino al raggiungimento del Take Profit.
