@@ -17,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# STILE CSS "LIQUID GLASS" SEQUENZIALE E PROPORZIONATO
+# STILE CSS "LIQUID GLASS" AGGIORNATO PER ALLINEAMENTO PULITO
 st.markdown("""
     <style>
     .metric-card {
@@ -361,47 +361,55 @@ if ticker:
         </div>
     """, unsafe_allow_html=True)
 
-    # 2. BLOCCO CHECK INIZIALE
+    # 2. BLOCCO CHECK INIZIALE (RIGOROSAMENTE SU LINEE SEPARATE)
     liq_color_badge = "#238636" if check_liq_ok else "#da3633"
     vol_color_badge = "#238636" if check_vol_ok else ("#d29922" if atr_pct < 1.5 else "#da3633")
     
     st.markdown(f"""
         <div class="flow-card" style="border-left: 5px solid {check_border_color};">
             <div>
-                <span>🛡️ <b>Check Iniziale:</b> </span>
-                <span style="color: {liq_color_badge}; font-weight: 600;">Liquidità: {vol_str}</span> &nbsp;|&nbsp; 
-                <span style="color: {vol_color_badge}; font-weight: 600;">ATR: {atr_pct:.2f}%</span>
+                <div style="font-weight: 700; margin-bottom: 2px;">🛡️ Check Iniziale</div>
+                <div style="color: {liq_color_badge}; font-weight: 500;">• Liquidità: {vol_str}</div>
+                <div style="color: {vol_color_badge}; font-weight: 500;">• ATR: {atr_pct:.2f}%</div>
             </div>
-            <div>
-                <b>Stato:</b> <span style="color: {check_border_color}; font-weight: bold;">{'SUPERATO' if check_iniziale_passato else 'ATTENZIONE / NON IDEALE'}</span>
+            <div style="text-align: right;">
+                <span style="font-size: 10px; opacity: 0.7; text-transform: uppercase; display: block; margin-bottom: 2px;">Stato</span>
+                <b style="color: {check_border_color};">{'SUPERATO' if check_iniziale_passato else 'NON IDEALE'}</b>
             </div>
         </div>
     """, unsafe_allow_html=True)
 
-    # 3. BLOCCO MACRO TREND
+    # 3. BLOCCO MACRO TREND (RIGOROSAMENTE SU LINEE SEPARATE)
     macro_border_color = "#238636" if is_macro_bull else "#da3633"
-    macro_text = "🟢 Bullish (Sopra SMA200 - OK per procedere)" if is_macro_bull else "🔴 Bearish (Sotto SMA200 - Blocco Long Attivo)"
+    macro_text = "Bullish (Sopra SMA200 - OK)" if is_macro_bull else "Bearish (Sotto SMA200 - Blocco)"
     st.markdown(f"""
         <div class="flow-card" style="border-left: 5px solid {macro_border_color};">
             <div>
-                <span>🌍 <b>Macro Trend Gatekeeper ({get_dynamic_benchmark(ticker)}):</b></span>
+                <div style="font-weight: 700; margin-bottom: 2px;">🌍 Macro Trend Gatekeeper</div>
+                <div style="font-weight: 500; opacity: 0.8;">Peer: {get_dynamic_benchmark(ticker)}</div>
             </div>
-            <div>
-                <span style="color: {macro_border_color}; font-weight: bold;">{macro_text}</span>
+            <div style="text-align: right;">
+                <span style="font-size: 10px; opacity: 0.7; text-transform: uppercase; display: block; margin-bottom: 2px;">Trend</span>
+                <b style="color: {macro_border_color};">{macro_text}</b>
             </div>
         </div>
     """, unsafe_allow_html=True)
 
-    # 4. BLOCCO CONFLUENZA QUANTITATIVA
+    # 4. BLOCCO CONFLUENZA QUANTITATIVA (RIGOROSAMENTE SU LINEE SEPARATE)
     conf_ok = prob >= 62.0 and win_rate >= 55.0 and risk_reward >= 1.5
     conf_border = "#238636" if conf_ok else "#d29922"
+    conf_status_text = "CONFLUENZA PIENA (OK)" if conf_ok else "SOTTO SOGLIA"
     st.markdown(f"""
         <div class="flow-card" style="border-left: 5px solid {conf_border};">
             <div>
-                <span>📊 <b>Confluenza Quantitativa:</b> Prob. Rialzo: <b>{prob:.1f}%</b> | Net Win Rate: <b>{win_rate:.1f}%</b> | R/R Ratio: <b>1:{risk_reward:.1f}</b></span>
+                <div style="font-weight: 700; margin-bottom: 2px;">📊 Confluenza Quantitativa</div>
+                <div style="font-weight: 500;">• Prob. Rialzo: {prob:.1f}%</div>
+                <div style="font-weight: 500;">• Net Win Rate: {win_rate:.1f}%</div>
+                <div style="font-weight: 500;">• R/R Ratio: 1:{risk_reward:.1f}</div>
             </div>
-            <div>
-                <b style="color: {conf_border};">{'CONFLUENZA PIENA (OK)' if conf_ok else 'SOTTO SOGLIA OTTIMALE'}</b>
+            <div style="text-align: right;">
+                <span style="font-size: 10px; opacity: 0.7; text-transform: uppercase; display: block; margin-bottom: 2px;">Valutazione</span>
+                <b style="color: {conf_border};">{conf_status_text}</b>
             </div>
         </div>
     """, unsafe_allow_html=True)
@@ -540,7 +548,7 @@ if ticker:
     else:
         st.info("Nessuna notizia recente.")
 
-    # GUIDA ACCADEMICA E CAPITOLO PRATICO ESECUTIVO (MASTERPLAN 200€ & POSITION SIZING)
+    # GUIDA ACCADEMICA E CAPITOLO PRATICO ESECUTIVO
     st.write("")
     with st.expander("📖 Guida ai Risultati, Flusso Operativo e Masterplan 200€/Mese (Position Sizing 1%)"):
         st.markdown(r"""
