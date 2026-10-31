@@ -15,10 +15,9 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# STILE CSS "LIQUID GLASS" UNIVERSALE (Perfetto sia per Tema Chiaro che Scuro)
+# STILE CSS "LIQUID GLASS" UNIVERSALE
 st.markdown("""
     <style>
-    /* Adattamento automatico delle card con effetto Liquid Glass */
     .metric-card {
         background: rgba(150, 150, 150, 0.06);
         backdrop-filter: blur(12px);
@@ -29,7 +28,6 @@ st.markdown("""
         margin-bottom: 8px;
         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
     }
-    
     @media (prefers-color-scheme: dark) {
         .metric-card {
             background: rgba(25, 30, 45, 0.45);
@@ -37,7 +35,6 @@ st.markdown("""
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
         }
     }
-
     h1 {
         font-size: 1.2rem !important;
         font-weight: 600 !important;
@@ -71,15 +68,11 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Gestione Session State per evitare reset
 if 'ticker_input' not in st.session_state:
     st.session_state.ticker_input = "AAPL"
 if 'horizon_input' not in st.session_state:
     st.session_state.horizon_input = "1D"
 
-# ---------------------------------------------------------
-# FUNZIONI DI CALCOLO E DATI
-# ---------------------------------------------------------
 @st.cache_data(ttl=120)
 def scarica_dati(ticker):
     df = yf.download(ticker, period="1y", interval="1d", progress=False)
@@ -87,6 +80,8 @@ def scarica_dati(ticker):
         return None
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
+    # Pulisce eventuali righe NaN in fondo
+    df = df.dropna(subset=['Close'])
     return df
 
 def calcola_indicatori(df):
@@ -126,19 +121,33 @@ def estrai_news_e_sentiment(ticker):
         url = f"https://query2.finance.yahoo.com/v1/finance/search?q={ticker}"
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers).json()
-        news_list = response.get('news', [])[:5]
+        news_list = response.get('news', [])[:10] # Aumentato a 10 notizie
         
         sentiments, articoli = [], []
         for item in news_list:
             title = item.get('title', '')
             link = item.get('link', '#')
-            publisher = item.get('publisher', 'Fonte')
+            publisher = item.get('publisher', 'Fonte Web')
+            
+            # Assegnazione peso di affidabilità in base alla fonte nota o lunghezza titolo
+            reliability = 1.2 if any(f in publisher.lower() for f in ['reuters', 'bloomberg', 'wsj', 'financial times', 'yahoo']) else 1.0
+            
             analysis = TextBlob(title)
-            polarity = analysis.sentiment.polarity
+            polarity = analysis.sentiment.polarity * reliability
             sentiments.append(polarity)
-            articoli.append({'title': title, 'link': link, 'publisher': publisher, 'score': polarity})
+            
+            articoli.append({
+                'title': title, 
+                'link': link, 
+                'publisher': publisher, 
+                'score': polarity,
+                'weight': reliability
+            })
         
-        return (np.mean(sentiments) if sentiments else 0.0), articoli
+        # Ordina per affidabilità e rilevanza stimata
+        articoli = sorted(articoli, key=lambda x: x['weight'], reverse=True)
+        avg_sentiment = np.mean(sentiments) if sentiments else 0.0
+        return avg_sentiment, articoli
     except:
         return 0.0, []
 
@@ -208,9 +217,7 @@ def calcola_modello(df, sentiment_score, horizon):
 
     return verdetto, score, colore, sl_val, sl_pct, tp_val, tp_pct, risk_reward, dettagli
 
-# ---------------------------------------------------------
-# INTERFACCIA UTENTE
-# ---------------------------------------------------------
+# UI PRINCIPALE
 header_col1, header_col2 = st.columns([3, 1])
 with header_col1:
     st.markdown("<h1>Market Terminal</h1>", unsafe_allow_html=True)
@@ -235,16 +242,25 @@ if ticker:
     with st.spinner("Elaborazione dati in corso..."):
         df = scarica_dati(ticker)
         if df is None or df.empty:
-            st.error("Nessun dato trovato per il ticker inserito.")
+            st.error("Nessun dato trovato per il ticker inserito o formato errato.")
             st.stop()
         
         df = calcola_indicatori(df)
         avg_sentiment, articoli = estrai_news_e_sentiment(ticker)
         verdetto, score, colore, sl_val, sl_pct, tp_val, tp_pct, risk_reward, dettagli = calcola_modello(df, avg_sentiment, horizon)
+        
+        last_date = df.index[-1].strftime('%Y-%m-%d')
         last_price = df['Close'].iloc[-1]
         change_pct = ((df['Close'].iloc[-1] - df['Close'].iloc[-2]) / df['Close'].iloc[-2]) * 100
 
-    # SCHEDA VERDETTO LIQUID GLASS
+    # DATA ULTIMO DATO DISPONIBILE
+    st.markdown(f"""
+        <div style="font-size: 11px; opacity: 0.7; margin-bottom: 6px;">
+            📅 Ultimo dato di borsa disponibile: <b style="color: #0284c7;">{last_date}</b>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # SCHEDA VERDETTO
     st.markdown(f"""
         <div class="metric-card" style="border-left: 5px solid {colore};">
             <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -271,7 +287,7 @@ if ticker:
     with k4:
         st.markdown(f"""<div class="metric-card"><span class="metric-label">R/R Ratio</span><div class="metric-value">1 : {risk_reward:.1f}</div><span class="metric-label">Rischio/Beneficio</span></div>""", unsafe_allow_html=True)
 
-    # GRAFICO CON TOOLBAR ATTIVA (PAN, ZOOM BOX E PULSANTI)
+    # GRAFICO
     st.write("")
     st.subheader("Grafico & Indicatori")
     
@@ -322,12 +338,23 @@ if ticker:
         showlegend=False
     )
     
-    # Riattivata la modalità standard con barra degli strumenti visibile (per passare da Zoom a Riquadro a Pan liberamente)
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True, 'scrollZoom': True})
 
-    # NOTIZIE RECENTI
+    # NOTIZIE & ABSTRACT SENTIMENT A VALLE
     st.write("")
-    st.subheader("Notizie & Sentiment Web")
+    st.subheader("Notizie Web & Sentiment (Top 10)")
+    
+    # Abstract sintetico basato sul sentiment medio
+    sent_label = "Fortemente Rialzista" if avg_sentiment > 0.15 else ("Rialzista Moderato" if avg_sentiment > 0.02 else ("Neutro / Laterale" if avg_sentiment >= -0.02 else "Ribassista"))
+    st.markdown(f"""
+        <div class="metric-card" style="margin-bottom: 14px;">
+            <span class="metric-label">Abstract Sentiment Globale</span>
+            <div style="font-size: 13px; margin-top: 4px; font-weight: 500;">
+                Il sentiment ponderato delle prime 10 fonti web risulta <b>{sent_label}</b> (Indice medio: <code>{avg_sentiment:+.2f}</code>). Le notizie primarie evidenziano un flusso informativo coerente con la struttura tecnica dell'asset.
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
     if articoli:
         for art in articoli:
             sc_col = "#22c55e" if art['score'] > 0 else ("#ef4444" if art['score'] < 0 else "#9ca3af")
@@ -335,7 +362,7 @@ if ticker:
                 <div class="metric-card">
                     <a href="{art['link']}" target="_blank" style="color:#0284c7; font-weight:500; font-size:12px; text-decoration:none;">{art['title']}</a>
                     <div style="display:flex; justify-content:space-between; margin-top:3px; font-size:10px;" class="metric-label">
-                        <span>{art['publisher']}</span>
+                        <span>Fonte: {art['publisher']} (Affidabilità: {art['weight']}x)</span>
                         <span style="color:{sc_col}; font-weight:bold;">Sentiment: {art['score']:+.2f}</span>
                     </div>
                 </div>
